@@ -50,15 +50,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { result: hits, ms: retrieveMs } = await timed(() => retrieve(store, question, { k: 4 }));
+  const { result: retrieved, ms: retrieveMs } = await timed(() => retrieve(store, question, { k: 4 }));
+  const { hits, candidateScores } = retrieved;
   const retrieval = hits.map((h) => ({
     source: h.chunk.source ?? h.chunk.id,
     score: Number(h.score.toFixed(3)),
     snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 240),
   }));
 
-  // verify: true runs the output-side faithfulness check after generation.
-  const result = await answerQuestion(question, hits, { verify: true });
+  // verify: true runs the output-side faithfulness check after generation;
+  // candidateScores feed the relative grounding gate.
+  const result = await answerQuestion(question, hits, { verify: true, candidateScores });
 
   const f = result.faithfulness;
 

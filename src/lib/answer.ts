@@ -14,17 +14,33 @@ import type { SearchHit } from "./store";
  */
 
 export interface GroundingPolicy {
-  /** Minimum top-hit similarity required to attempt an answer. */
+  /** Absolute floor on top-hit similarity — a backstop, kept deliberately low. */
   minTopScore: number;
   /** Minimum number of retrieved hits required. */
   minHits: number;
+  /**
+   * Relative margin: how far above the candidate set's mean score the top hit
+   * must sit, measured in standard deviations (a z-score). This is the part that
+   * transfers across corpora — a real match stands out from the pile; a near-miss
+   * sits in it. Set to 0 to disable and fall back to the absolute floor only.
+   */
+  minMargin: number;
 }
 
-// minTopScore was 0.3 until the eval's adversarial case (on-topic vocabulary the
-// corpus never covers) slipped in at 0.344, while every genuine in-corpus query
-// scores 0.52+. Raised to 0.40 to sit in that gap: refuse the near-miss, keep the
-// real hits.
-export const DEFAULT_POLICY: GroundingPolicy = { minTopScore: 0.4, minHits: 1 };
+// The gate now requires BOTH tests to pass. The absolute floor catches a hit that
+// is simply too weak in similarity terms (the adversarial near-miss topped out at
+// 0.344, so the floor sits at 0.40). The relative margin catches the case a fixed
+// floor cannot: a corpus where everything scores high, where the question is not
+// "is the top score big?" but "does the top hit actually stand out from the rest?"
+export const DEFAULT_POLICY: GroundingPolicy = { minTopScore: 0.4, minHits: 1, minMargin: 1.0 };
+
+function mean(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+function stdev(xs: number[], mu: number): number {
+  return Math.sqrt(xs.reduce((a, b) => a + (b - mu) ** 2, 0) / xs.length);
+}
 
 export interface Citation {
   source?: string;
@@ -42,9 +58,30 @@ export interface Answer {
   timings: { generateMs: number; verifyMs: number };
 }
 
-/** The grounding gate: is retrieved context strong enough to answer at all? */
-export function isGrounded(hits: SearchHit[], policy: GroundingPolicy = DEFAULT_POLICY): boolean {
-  return hits.length >= policy.minHits && (hits[0]?.score ?? 0) >= policy.minTopScore;
+/**
+ * The grounding gate: is retrieved context strong enough to answer at all?
+ *
+ * A hit must clear a low absolute floor AND stand out from this query's own
+ * candidate distribution by `minMargin` standard deviations. The relative test is
+ * the one that matters and the one that transfers across corpora; pass the
+ * candidate scores from `retrieve` to enable it. With too few candidates to form a
+ * distribution, it falls back to the absolute floor.
+ */
+export function isGrounded(
+  hits: SearchHit[],
+  candidateScores: number[] = [],
+  policy: GroundingPolicy = DEFAULT_POLICY,
+): boolean {
+  if (hits.length < policy.minHits) return false;
+  const top = hits[0]?.score ?? 0;
+  if (top < policy.minTopScore) return false;
+
+  if (policy.minMargin <= 0 || candidateScores.length < 4) return true;
+  const mu = mean(candidateScores);
+  const sd = stdev(candidateScores, mu);
+  if (sd === 0) return true;
+  const z = (top - mu) / sd;
+  return z >= policy.minMargin;
 }
 
 const REFUSAL =
@@ -53,11 +90,16 @@ const REFUSAL =
 export async function answerQuestion(
   question: string,
   hits: SearchHit[],
-  opts: { provider?: string; policy?: GroundingPolicy; verify?: boolean } = {},
+  opts: {
+    provider?: string;
+    policy?: GroundingPolicy;
+    verify?: boolean;
+    candidateScores?: number[];
+  } = {},
 ): Promise<Answer> {
   const policy = opts.policy ?? DEFAULT_POLICY;
 
-  if (!isGrounded(hits, policy)) {
+  if (!isGrounded(hits, opts.candidateScores ?? [], policy)) {
     return {
       grounded: false,
       text: REFUSAL,

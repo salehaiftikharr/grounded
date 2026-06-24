@@ -55,7 +55,7 @@ I don't have enough grounded information in the corpus to answer that confidentl
 - **Ingest** (`src/ingest.ts`, `src/chunk.ts`) — split docs into overlapping chunks, embed them, persist to a JSON vector store.
 - **Retrieve** (`src/retrieve.ts`) — embed the query, vector-search a wide candidate set, then **rerank** by blending cosine score with lexical overlap (a cheap stand-in for a cross-encoder reranker, which slots in at the same seam).
 - **Ground & answer** (`src/answer.ts`) — the **grounding gate** (`isGrounded`) checks hit count and top similarity; only if it passes does the LLM generate an answer constrained to the retrieved context, with inline citations.
-- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context, returning a per-claim verdict and an overall faithfulness score. This catches the model drifting past its sources even when retrieval succeeded.
+- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context, returning a per-claim verdict and an overall faithfulness score. This catches the model drifting past its sources even when retrieval succeeded. The checker is deliberately a **different model** from the generator (a generator and checker from the same weights share blind spots) and is prompted **adversarially** — assume each claim is unsupported until the context proves it.
 - **Observe** (`src/observe.ts`) — every request reports where the time went (retrieve / generate / verify) and how many tokens it cost, surfaced in the CLI and the web UI.
 
 ## Why two gates
@@ -73,25 +73,43 @@ this wrong, so there are two gates:
 Together they are the same "never ship the wrong thing" stance as a verification
 gate in agent work, applied to both the input and the output of retrieval.
 
-## Does it retrieve the right thing, refuse the rest, and stay faithful? The eval
+**What faithfulness does and does not mean.** The check measures whether the
+answer is faithful to the *retrieved evidence* — not whether it is *true*. If
+retrieval surfaces a chunk that is similar but wrong, an answer can be perfectly
+faithful to it and still false. Faithfulness assumes the grounding gate and the
+corpus did their job; it is a guard against the model, not against bad sources.
 
-`grounded eval` runs a labeled set (`src/eval/cases.ts`): in-corpus questions that
-name the source that *should* be retrieved, and out-of-corpus questions that
-*should* be refused (including an adversarial near-miss that shares the corpus's
-vocabulary but is not covered). It reports retrieval hit-rate, refusal discipline,
-and — with `--verify` — mean answer faithfulness.
+## The eval (a regression set, not a benchmark)
+
+`grounded eval` runs a **small, labeled regression set** (`src/eval/cases.ts`).
+With this few cases the pass rate is a smoke test, not a statistic — the value is
+catching regressions and the **adversarial near-misses**: questions that borrow the
+corpus's vocabulary but ask about things it never covers. It reports retrieval
+hit-rate, refusal discipline, and — with `--verify` — mean answer faithfulness.
 
 ```
 $ npm run grounded eval
 
-Retrieval hit-rate: 6/6 (100%)
-Refused out-of-corpus correctly: 3/3
-Accuracy: 9/9 (100%)
+Retrieval hit-rate: 12/12 (100%)
+Refused clear out-of-corpus: 2/2
+Refused adversarial near-miss (gate alone): 3/4
+  note: gate leaks here are caught downstream — the generator answers
+  "I don't know" and the faithfulness check confirms it.
+
+✓ PASS (retrieval hits + clear refusals)
 ```
 
-> The adversarial case is what raised the gate's threshold: it slipped in at a
-> similarity of 0.344 while every genuine query scored 0.52+, so the gate moved to
-> 0.40 to sit in that gap. The eval drove the fix.
+Two things this surfaced, both kept honestly rather than tuned away:
+
+- **The eval drives the gate.** An early adversarial case slipped past an absolute
+  cosine threshold, which motivated moving to a **relative** gate (a hit must stand
+  out from the query's own candidate-score distribution, not clear a fixed value
+  that does not transfer across corpora), with a low absolute floor as a backstop.
+- **One near-miss still passes the gate** ("which vector database is fastest at
+  billion-scale search?") because it shares too much vocabulary with the retrieval
+  doc. That is the case the gate *cannot* catch alone — and exactly why the layers
+  behind it exist: the generator answers "I do not know," and the faithfulness
+  check confirms what it did say. Defense in depth, shown rather than hidden.
 
 ## Run it
 
@@ -137,6 +155,8 @@ generation is IP-rate-limited to cap demo spend.
 ## Stack & production swap points
 
 - **TypeScript + Next.js + Vercel AI SDK** (`ai`), provider seam in `src/lib/model.ts` — Claude or GPT for generation, OpenAI embeddings.
+- **Decorrelated checker** — the faithfulness checker defaults to a smaller, faster model than the generator; set `CHECKER_PROVIDER=openai` (or `CHECKER_MODEL`) to verify with a different model *family* entirely.
+- **Grounding gate** is relative (z-score over the candidate distribution) plus an absolute floor, in `src/lib/answer.ts`; tune `minMargin` / `minTopScore` per corpus.
 - **Vector store** is in-memory + JSON for a corpus this size; the `VectorStore` interface in `src/lib/store.ts` (`add` / `search` / `persist`) is the swap point for **pgvector / Pinecone / Weaviate**.
 - **Reranker** is lexical-overlap today; the `rerank()` seam in `src/lib/retrieve.ts` is where a cross-encoder or LLM reranker drops in.
 

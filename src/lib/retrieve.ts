@@ -26,19 +26,33 @@ export function rerank(query: string, hits: SearchHit[], weight = 0.2): SearchHi
     .sort((a, b) => b.score - a.score);
 }
 
+export interface Retrieval {
+  /** The top-k reranked hits used to answer. */
+  hits: SearchHit[];
+  /**
+   * Reranked scores of the whole candidate set. This is the per-query baseline
+   * the grounding gate judges against: "does the top hit actually stand out from
+   * everything else this corpus returned, or is it just the tallest of a flat,
+   * unrelated pile?" — which transfers across corpora better than a fixed cutoff.
+   */
+  candidateScores: number[];
+}
+
 /**
  * The query half of RAG: embed the query, vector-search a wide candidate set,
  * rerank, and keep the top-k. Retrieving wide then reranking narrow is what gives
- * the reranker something to improve on.
+ * the reranker something to improve on — and the wide set's score distribution is
+ * what lets the grounding gate be relative rather than a brittle absolute cutoff.
  */
 export async function retrieve(
   store: VectorStore,
   query: string,
   opts: { k?: number; candidates?: number } = {},
-): Promise<SearchHit[]> {
+): Promise<Retrieval> {
   const k = opts.k ?? 4;
   const candidates = opts.candidates ?? Math.max(k * 4, 12);
   const queryEmbedding = await embedQuery(query);
   const hits = store.search(queryEmbedding, candidates);
-  return rerank(query, hits).slice(0, k);
+  const reranked = rerank(query, hits);
+  return { hits: reranked.slice(0, k), candidateScores: reranked.map((h) => h.score) };
 }

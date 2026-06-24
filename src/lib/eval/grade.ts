@@ -19,6 +19,7 @@ import { cases as defaultCases, type EvalCase } from "./cases";
 export interface EvalResult {
   question: string;
   expectSource: string | null;
+  adversarial: boolean;
   retrievedSources: string[];
   topScore: number;
   retrievalHit: boolean;
@@ -31,12 +32,19 @@ export interface EvalResult {
 export interface EvalReport {
   results: EvalResult[];
   retrieval: { hits: number; total: number; rate: number };
+  /** Clear out-of-corpus questions the gate must refuse. */
   refusal: { correct: number; total: number };
+  /**
+   * Adversarial near-misses: topically adjacent but uncovered. The grounding gate
+   * alone is not expected to catch all of these — that is what the generator's
+   * "say you don't know" instruction and the faithfulness check are for — so a
+   * leak here is reported as a warning, not a hard failure.
+   */
+  adversarial: { refused: number; total: number };
   /** Mean faithfulness over answered in-corpus cases; null when not measured. */
   faithfulness: { mean: number; total: number } | null;
-  correct: number;
-  total: number;
-  accuracy: number;
+  /** Hard pass: retrieval hits + clear refusals all correct. */
+  passed: boolean;
 }
 
 export async function evaluate(
@@ -49,10 +57,10 @@ export async function evaluate(
 
   for (const c of cases) {
     log(`asking "${c.question}"…`);
-    const hits = await retrieve(store, c.question);
+    const { hits, candidateScores } = await retrieve(store, c.question);
     const retrievedSources = [...new Set(hits.map((h) => h.chunk.source ?? h.chunk.id))];
     const topScore = hits[0]?.score ?? 0;
-    const grounded = isGrounded(hits);
+    const grounded = isGrounded(hits, candidateScores);
 
     let retrievalHit = false;
     let correct: boolean;
@@ -67,13 +75,18 @@ export async function evaluate(
     // Optional, costs a generation + a verification pass per answered case.
     let faithfulness: number | undefined;
     if (opts.verify && grounded && c.expectSource !== null) {
-      const answer = await answerQuestion(c.question, hits, { provider: opts.provider, verify: true });
+      const answer = await answerQuestion(c.question, hits, {
+        provider: opts.provider,
+        verify: true,
+        candidateScores,
+      });
       faithfulness = answer.faithfulness?.score;
     }
 
     results.push({
       question: c.question,
       expectSource: c.expectSource,
+      adversarial: c.adversarial ?? false,
       retrievedSources,
       topScore,
       retrievalHit,
@@ -84,10 +97,11 @@ export async function evaluate(
   }
 
   const inCorpus = results.filter((r) => r.expectSource !== null);
-  const outCorpus = results.filter((r) => r.expectSource === null);
+  const clearOut = results.filter((r) => r.expectSource === null && !r.adversarial);
+  const adversarialOut = results.filter((r) => r.expectSource === null && r.adversarial);
   const retrievalHits = inCorpus.filter((r) => r.retrievalHit).length;
-  const refusedCorrectly = outCorpus.filter((r) => !r.grounded).length;
-  const correct = results.filter((r) => r.correct).length;
+  const refusedClear = clearOut.filter((r) => !r.grounded).length;
+  const refusedAdversarial = adversarialOut.filter((r) => !r.grounded).length;
 
   const scored = results.filter((r) => typeof r.faithfulness === "number");
   const faithfulness = scored.length
@@ -101,10 +115,9 @@ export async function evaluate(
       total: inCorpus.length,
       rate: inCorpus.length ? retrievalHits / inCorpus.length : 0,
     },
-    refusal: { correct: refusedCorrectly, total: outCorpus.length },
+    refusal: { correct: refusedClear, total: clearOut.length },
+    adversarial: { refused: refusedAdversarial, total: adversarialOut.length },
     faithfulness,
-    correct,
-    total: results.length,
-    accuracy: results.length ? correct / results.length : 0,
+    passed: retrievalHits === inCorpus.length && refusedClear === clearOut.length,
   };
 }

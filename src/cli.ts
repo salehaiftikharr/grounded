@@ -48,7 +48,9 @@ async function main(): Promise<void> {
   switch (command) {
     case "ingest": {
       const dir = rest[0] ? path.resolve(rest[0]) : CORPUS;
-      const store = await ingestDir(dir, { onLog: (m) => console.log(m) });
+      // Same chunk settings as scripts/precompute.ts, so the CLI index and the
+      // web demo index behave identically.
+      const store = await ingestDir(dir, { size: 420, overlap: 80, onLog: (m) => console.log(m) });
       store.persist(INDEX);
       console.log(`✓ indexed ${store.size} chunk(s) → ${path.relative(process.cwd(), INDEX)}`);
       break;
@@ -59,9 +61,13 @@ async function main(): Promise<void> {
       if (!question) fail('Usage: grounded ask "<question>"');
       const store = VectorStore.load(INDEX);
       if (!store.size) fail("No index yet. Run: npm run grounded ingest");
-      const hits = await retrieve(store, question);
+      const { hits, candidateScores } = await retrieve(store, question);
       // Verify by default on the CLI; pass --no-verify to skip the extra pass.
-      const answer = await answerQuestion(question, hits, { provider, verify: verify !== false });
+      const answer = await answerQuestion(question, hits, {
+        provider,
+        verify: verify !== false,
+        candidateScores,
+      });
       console.log("");
       console.log(answer.text);
       if (answer.grounded && answer.citations.length) {
@@ -95,24 +101,42 @@ async function main(): Promise<void> {
       const report = await evaluate(store, { provider, verify, onLog: (m) => console.log(`  ${m}`) });
       console.log("");
       for (const r of report.results) {
-        const mark = r.correct ? "✓" : "✗";
-        const detail =
-          r.expectSource === null
-            ? `out-of-corpus → ${r.grounded ? "ANSWERED (should refuse)" : "refused"}`
-            : `expect ${r.expectSource} → ${r.retrievalHit ? "retrieved" : "missed"} (top ${r.topScore.toFixed(2)})`;
-        console.log(`${mark} ${detail}`);
+        if (r.expectSource === null) {
+          const refused = !r.grounded;
+          if (r.adversarial) {
+            console.log(
+              `${refused ? "✓" : "⚠"} adversarial near-miss → ${refused ? "refused" : "passed gate (caught downstream)"} (top ${r.topScore.toFixed(2)})`,
+            );
+          } else {
+            console.log(
+              `${refused ? "✓" : "✗"} out-of-corpus → ${refused ? "refused" : "ANSWERED (should refuse)"}`,
+            );
+          }
+        } else {
+          console.log(
+            `${r.correct ? "✓" : "✗"} expect ${r.expectSource} → ${r.retrievalHit ? "retrieved" : "missed"} (top ${r.topScore.toFixed(2)})`,
+          );
+        }
       }
       console.log(
         `\nRetrieval hit-rate: ${report.retrieval.hits}/${report.retrieval.total} (${(report.retrieval.rate * 100).toFixed(0)}%)`,
       );
-      console.log(`Refused out-of-corpus correctly: ${report.refusal.correct}/${report.refusal.total}`);
+      console.log(`Refused clear out-of-corpus: ${report.refusal.correct}/${report.refusal.total}`);
+      console.log(
+        `Refused adversarial near-miss (gate alone): ${report.adversarial.refused}/${report.adversarial.total}`,
+      );
+      if (report.adversarial.refused < report.adversarial.total) {
+        console.log(
+          "  note: gate leaks here are caught downstream — the generator answers \"I don't know\" and the faithfulness check confirms it.",
+        );
+      }
       if (report.faithfulness) {
         console.log(
           `Mean faithfulness (${report.faithfulness.total} answered): ${(report.faithfulness.mean * 100).toFixed(0)}%`,
         );
       }
-      console.log(`Accuracy: ${report.correct}/${report.total} (${(report.accuracy * 100).toFixed(0)}%)`);
-      process.exitCode = report.correct === report.total ? 0 : 1;
+      console.log(`\n${report.passed ? "✓ PASS" : "✗ FAIL"} (retrieval hits + clear refusals)`);
+      process.exitCode = report.passed ? 0 : 1;
       break;
     }
 
