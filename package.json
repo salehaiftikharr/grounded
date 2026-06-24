@@ -1,0 +1,23 @@
+{
+  "name": "grounded-rag",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A retrieval-augmented Q&A agent that cites its sources and refuses when the answer is not grounded in the corpus.",
+  "scripts": {
+    "rag": "tsx src/cli.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.79",
+    "@ai-sdk/openai": "^3.0.65",
+    "ai": "^6.0.191",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.22.4",
+    "typescript": "^5"
+  }
+}

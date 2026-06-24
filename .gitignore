@@ -1,0 +1,7 @@
+node_modules
+.env
+.env.local
+*.tsbuildinfo
+
+# the vector index is a build artifact — re-ingest the corpus to rebuild it
+/index.json
