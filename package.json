@@ -1,11 +1,11 @@
 {
-  "name": "grounded-rag",
+  "name": "grounded",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "A retrieval-augmented Q&A agent that cites its sources and refuses when the answer is not grounded in the corpus.",
   "scripts": {
-    "rag": "tsx src/cli.ts",
+    "grounded": "tsx src/cli.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

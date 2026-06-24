@@ -1,10 +1,10 @@
 /**
- * grounded-rag CLI
+ * Grounded CLI
  *
- *   rag ingest [dir]      index a corpus of .md/.txt files (default: ./corpus)
- *   rag ask "<question>"  answer from the indexed corpus, with citations,
- *                         or refuse if the question is not grounded
- *   rag eval              grade retrieval hit-rate and grounding discipline
+ *   grounded ingest [dir]      index a corpus of .md/.txt files (default: ./corpus)
+ *   grounded ask "<question>"  answer from the indexed corpus, with citations,
+ *                              or refuse if the question is not grounded
+ *   grounded eval              grade retrieval hit-rate and grounding discipline
  *
  *   --provider anthropic|openai   override LLM_PROVIDER for generation
  */
@@ -51,9 +51,9 @@ async function main(): Promise<void> {
 
     case "ask": {
       const question = rest.join(" ").trim();
-      if (!question) fail('Usage: rag ask "<question>"');
+      if (!question) fail('Usage: grounded ask "<question>"');
       const store = VectorStore.load(INDEX);
-      if (!store.size) fail("No index yet. Run: npm run rag ingest");
+      if (!store.size) fail("No index yet. Run: npm run grounded ingest");
       const hits = await retrieve(store, question);
       const answer = await answerQuestion(question, hits, { provider });
       console.log("");
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
 
     case "eval": {
       const store = VectorStore.load(INDEX);
-      if (!store.size) fail("No index yet. Run: npm run rag ingest");
+      if (!store.size) fail("No index yet. Run: npm run grounded ingest");
       console.log("Grounded-RAG eval — retrieval hit-rate and grounding discipline\n");
       const report = await evaluate(store, { provider, onLog: (m) => console.log(`  ${m}`) });
       console.log("");
@@ -93,11 +93,11 @@ async function main(): Promise<void> {
     default:
       console.log(
         [
-          "grounded-rag — a retrieval Q&A agent that cites sources and refuses when ungrounded.",
+          "Grounded — a retrieval Q&A agent that cites sources and refuses when ungrounded.",
           "",
-          "  rag ingest [dir]      index a corpus of .md/.txt files (default: ./corpus)",
-          '  rag ask "<question>"  answer from the corpus with citations, or refuse',
-          "  rag eval              grade retrieval hit-rate and grounding discipline",
+          "  grounded ingest [dir]      index a corpus of .md/.txt files (default: ./corpus)",
+          '  grounded ask "<question>"  answer from the corpus with citations, or refuse',
+          "  grounded eval              grade retrieval hit-rate and grounding discipline",
           "",
           "  --provider anthropic|openai   override the generation provider",
         ].join("\n"),

@@ -1,4 +1,4 @@
-# grounded-rag 🔎
+# Grounded 🔎
 
 A retrieval-augmented Q&A agent that **answers only from its corpus, cites its
 sources, and refuses when the answer is not grounded.** Ask it something the
@@ -10,7 +10,7 @@ The point of this project is the reliability layer most RAG demos skip: a
 all, and an **eval harness** that grades retrieval quality *and* that discipline.
 
 ```
-$ npm run rag ask "What does the grounding gate do?"
+$ npm run grounded ask "What does the grounding gate do?"
 
 The grounding gate is a guardrail that runs before generation. It checks how many
 chunks were retrieved and how strong the top similarity is, and refuses to answer
@@ -19,7 +19,7 @@ when retrieval is weak rather than producing an unsupported answer [1].
 Sources:
   - grounding.md (score 0.71)
 
-$ npm run rag ask "What is the capital of France?"
+$ npm run grounded ask "What is the capital of France?"
 
 I don't have enough grounded information in the corpus to answer that confidently.
 ```
@@ -61,7 +61,7 @@ name the source that *should* be retrieved, and out-of-corpus questions that
 *should* be refused. It reports retrieval hit-rate and refusal discipline.
 
 ```
-$ npm run rag eval
+$ npm run grounded eval
 
 Retrieval hit-rate: 4/4 (100%)
 Refused out-of-corpus correctly: 2/2
@@ -74,9 +74,9 @@ Accuracy: 6/6 (100%)
 npm install
 cp .env.example .env          # add OPENAI_API_KEY (embeddings) + ANTHROPIC_API_KEY (generation)
 
-npm run rag ingest            # index ./corpus into index.json
-npm run rag ask "What is reranking?"
-npm run rag eval
+npm run grounded ingest            # index ./corpus into index.json
+npm run grounded ask "What is reranking?"
+npm run grounded eval
 ```
 
 `npm test` runs the unit tests for the deterministic core (chunking, cosine
