@@ -10,11 +10,11 @@
  */
 import path from "node:path";
 import { loadEnv } from "./env";
-import { ingestDir } from "./ingest";
-import { retrieve } from "./retrieve";
-import { answerQuestion } from "./answer";
-import { VectorStore } from "./store";
-import { evaluate } from "./eval/grade";
+import { ingestDir } from "./lib/ingest";
+import { retrieve } from "./lib/retrieve";
+import { answerQuestion } from "./lib/answer";
+import { VectorStore } from "./lib/store";
+import { evaluate } from "./lib/eval/grade";
 
 loadEnv();
 

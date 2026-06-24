@@ -82,11 +82,35 @@ npm run grounded eval
 `npm test` runs the unit tests for the deterministic core (chunking, cosine
 search, reranking, and the grounding gate) — no API key needed.
 
+## Web app
+
+A Next.js UI (`app/`) makes the whole thing clickable: ask a question and see the
+**answer with citations**, the **grounding-gate decision** (grounded vs. refused,
+with the top similarity), and a **retrieval panel** showing the exact chunks that
+were pulled and their scores. Most RAG demos hide the machinery; this one shows it.
+
+```bash
+npm run precompute     # build data/index.json from ./corpus (needs OPENAI_API_KEY)
+npm run dev            # open http://localhost:3000
+```
+
+The API route retrieves and runs the grounding gate **locally** over the
+committed index, so only the query embedding and the final answer call the model;
+generation is IP-rate-limited to cap demo spend.
+
+## Deploy (Vercel)
+
+1. `npm run precompute` and commit the generated `data/index.json` (so the
+   deployment ships with its index — no ingest at runtime).
+2. Push and import the repo into Vercel.
+3. Set env vars: `OPENAI_API_KEY` (embeddings) and `ANTHROPIC_API_KEY` (generation).
+4. Deploy. Re-run `precompute` and re-commit whenever the corpus changes.
+
 ## Stack & production swap points
 
-- **TypeScript + Vercel AI SDK** (`ai`), provider seam in `src/model.ts` — Claude or GPT for generation, OpenAI embeddings.
-- **Vector store** is in-memory + JSON for a corpus this size; the `VectorStore` interface (`add` / `search` / `persist`) is the swap point for **pgvector / Pinecone / Weaviate**.
-- **Reranker** is lexical-overlap today; the `rerank()` seam is where a cross-encoder or LLM reranker drops in.
+- **TypeScript + Next.js + Vercel AI SDK** (`ai`), provider seam in `src/lib/model.ts` — Claude or GPT for generation, OpenAI embeddings.
+- **Vector store** is in-memory + JSON for a corpus this size; the `VectorStore` interface in `src/lib/store.ts` (`add` / `search` / `persist`) is the swap point for **pgvector / Pinecone / Weaviate**.
+- **Reranker** is lexical-overlap today; the `rerank()` seam in `src/lib/retrieve.ts` is where a cross-encoder or LLM reranker drops in.
 
 ---
 
