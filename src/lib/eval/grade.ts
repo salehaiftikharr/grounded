@@ -1,6 +1,6 @@
 import { VectorStore } from "../store";
 import { retrieve } from "../retrieve";
-import { isGrounded } from "../answer";
+import { answerQuestion, isGrounded } from "../answer";
 import { cases as defaultCases, type EvalCase } from "./cases";
 
 /**
@@ -24,12 +24,16 @@ export interface EvalResult {
   retrievalHit: boolean;
   grounded: boolean;
   correct: boolean;
+  /** Set only when faithfulness verification ran for this case. */
+  faithfulness?: number;
 }
 
 export interface EvalReport {
   results: EvalResult[];
   retrieval: { hits: number; total: number; rate: number };
   refusal: { correct: number; total: number };
+  /** Mean faithfulness over answered in-corpus cases; null when not measured. */
+  faithfulness: { mean: number; total: number } | null;
   correct: number;
   total: number;
   accuracy: number;
@@ -37,7 +41,7 @@ export interface EvalReport {
 
 export async function evaluate(
   store: VectorStore,
-  opts: { cases?: EvalCase[]; provider?: string; onLog?: (m: string) => void } = {},
+  opts: { cases?: EvalCase[]; provider?: string; verify?: boolean; onLog?: (m: string) => void } = {},
 ): Promise<EvalReport> {
   const cases = opts.cases ?? defaultCases;
   const log = opts.onLog ?? (() => {});
@@ -59,6 +63,14 @@ export async function evaluate(
       retrievalHit = retrievedSources.includes(c.expectSource);
       correct = retrievalHit && grounded;
     }
+
+    // Optional, costs a generation + a verification pass per answered case.
+    let faithfulness: number | undefined;
+    if (opts.verify && grounded && c.expectSource !== null) {
+      const answer = await answerQuestion(c.question, hits, { provider: opts.provider, verify: true });
+      faithfulness = answer.faithfulness?.score;
+    }
+
     results.push({
       question: c.question,
       expectSource: c.expectSource,
@@ -67,6 +79,7 @@ export async function evaluate(
       retrievalHit,
       grounded,
       correct,
+      faithfulness,
     });
   }
 
@@ -76,6 +89,11 @@ export async function evaluate(
   const refusedCorrectly = outCorpus.filter((r) => !r.grounded).length;
   const correct = results.filter((r) => r.correct).length;
 
+  const scored = results.filter((r) => typeof r.faithfulness === "number");
+  const faithfulness = scored.length
+    ? { mean: scored.reduce((s, r) => s + (r.faithfulness ?? 0), 0) / scored.length, total: scored.length }
+    : null;
+
   return {
     results,
     retrieval: {
@@ -84,6 +102,7 @@ export async function evaluate(
       rate: inCorpus.length ? retrievalHits / inCorpus.length : 0,
     },
     refusal: { correct: refusedCorrectly, total: outCorpus.length },
+    faithfulness,
     correct,
     total: results.length,
     accuracy: results.length ? correct / results.length : 0,

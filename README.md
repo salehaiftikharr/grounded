@@ -5,9 +5,11 @@ sources, and refuses when the answer is not grounded.** Ask it something the
 documents cover and it answers with citations; ask it something they do not and
 it says so, instead of guessing.
 
-The point of this project is the reliability layer most RAG demos skip: a
-**grounding gate** that decides whether retrieval is strong enough to answer at
-all, and an **eval harness** that grades retrieval quality *and* that discipline.
+The point of this project is the reliability layer most RAG demos skip. It guards
+**both ends**: a **grounding gate** that decides whether retrieval is strong
+enough to answer at all, and a **faithfulness check** that verifies the generated
+answer against its sources and flags any claim the context does not support. An
+**eval harness** grades retrieval quality, refusal discipline, *and* faithfulness.
 
 ```
 $ npm run grounded ask "What does the grounding gate do?"
@@ -35,38 +37,61 @@ I don't have enough grounded information in the corpus to answer that confidentl
   question ──► embed ──► vector search (top-N) ──► rerank ──► top-k hits
                                                               │
                                               ┌───────────────┴───────────────┐
-                                              │        grounding gate          │
+                                              │   grounding gate (input)       │
                                               │  strong enough to answer?      │
                                               └───────┬───────────────┬────────┘
                                                   yes │            no │
                                                       ▼               ▼
                                        cite-and-answer (LLM)      refuse
+                                                      │
+                                      ┌───────────────┴────────────────┐
+                                      │  faithfulness check (output)    │
+                                      │  is every claim supported?      │
+                                      └───────────────┬─────────────────┘
+                                                      ▼
+                                      answer + per-claim verdicts + trace
 ```
 
 - **Ingest** (`src/ingest.ts`, `src/chunk.ts`) — split docs into overlapping chunks, embed them, persist to a JSON vector store.
 - **Retrieve** (`src/retrieve.ts`) — embed the query, vector-search a wide candidate set, then **rerank** by blending cosine score with lexical overlap (a cheap stand-in for a cross-encoder reranker, which slots in at the same seam).
 - **Ground & answer** (`src/answer.ts`) — the **grounding gate** (`isGrounded`) checks hit count and top similarity; only if it passes does the LLM generate an answer constrained to the retrieved context, with inline citations.
+- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context, returning a per-claim verdict and an overall faithfulness score. This catches the model drifting past its sources even when retrieval succeeded.
+- **Observe** (`src/observe.ts`) — every request reports where the time went (retrieve / generate / verify) and how many tokens it cost, surfaced in the CLI and the web UI.
 
-## Why grounding is the point
+## Why two gates
 
 A wrong answer delivered confidently is worse than an honest "I don't know,"
-especially anywhere the output is trusted. The grounding gate is the same
-"never ship the wrong thing" stance as a verification gate in agent work, applied
-to retrieval: the system would rather refuse than fabricate.
+especially anywhere the output is trusted. There are two ways a RAG system gets
+this wrong, so there are two gates:
 
-## Does it actually retrieve the right thing — and refuse the rest? The eval
+- The **grounding gate** refuses when retrieval is too weak to answer — it would
+  rather say nothing than fabricate.
+- The **faithfulness check** flags when the answer outran its evidence — stating
+  something the retrieved sources never actually say, even though retrieval
+  succeeded.
 
-`rag eval` runs a labeled set (`src/eval/cases.ts`): in-corpus questions that
+Together they are the same "never ship the wrong thing" stance as a verification
+gate in agent work, applied to both the input and the output of retrieval.
+
+## Does it retrieve the right thing, refuse the rest, and stay faithful? The eval
+
+`grounded eval` runs a labeled set (`src/eval/cases.ts`): in-corpus questions that
 name the source that *should* be retrieved, and out-of-corpus questions that
-*should* be refused. It reports retrieval hit-rate and refusal discipline.
+*should* be refused (including an adversarial near-miss that shares the corpus's
+vocabulary but is not covered). It reports retrieval hit-rate, refusal discipline,
+and — with `--verify` — mean answer faithfulness.
 
 ```
 $ npm run grounded eval
 
-Retrieval hit-rate: 4/4 (100%)
-Refused out-of-corpus correctly: 2/2
-Accuracy: 6/6 (100%)
+Retrieval hit-rate: 6/6 (100%)
+Refused out-of-corpus correctly: 3/3
+Accuracy: 9/9 (100%)
 ```
+
+> The adversarial case is what raised the gate's threshold: it slipped in at a
+> similarity of 0.344 while every genuine query scored 0.52+, so the gate moved to
+> 0.40 to sit in that gap. The eval drove the fix.
 
 ## Run it
 
@@ -80,14 +105,17 @@ npm run grounded eval
 ```
 
 `npm test` runs the unit tests for the deterministic core (chunking, cosine
-search, reranking, and the grounding gate) — no API key needed.
+search, reranking, the grounding gate, faithfulness scoring, and token
+accounting) — no API key needed.
 
 ## Web app
 
 A Next.js UI (`app/`) makes the whole thing clickable: ask a question and see the
 **answer with citations**, the **grounding-gate decision** (grounded vs. refused,
-with the top similarity), and a **retrieval panel** showing the exact chunks that
-were pulled and their scores. Most RAG demos hide the machinery; this one shows it.
+with the top similarity), a **claim check** marking each statement supported or
+unsupported against the sources, a **retrieval panel** showing the exact chunks
+that were pulled and their scores, and a **trace** of latency and token cost. Most
+RAG demos hide the machinery; this one shows it.
 
 ```bash
 npm run precompute     # build data/index.json from ./corpus (needs OPENAI_API_KEY)

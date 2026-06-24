@@ -10,3 +10,6 @@ next-env.d.ts
 
 # the CLI's local index is a build artifact (data/index.json IS committed for the web demo)
 /index.json
+
+# macOS
+.DS_Store

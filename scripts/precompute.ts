@@ -14,7 +14,9 @@ const corpus = path.join(process.cwd(), "corpus");
 const dataDir = path.join(process.cwd(), "data");
 const out = path.join(dataDir, "index.json");
 
-const store = await ingestDir(corpus, { onLog: (m) => console.log(m) });
+// Smaller windows than the default so each short doc splits into a few focused
+// chunks — finer retrieval granularity and a more legible retrieval panel.
+const store = await ingestDir(corpus, { size: 420, overlap: 80, onLog: (m) => console.log(m) });
 mkdirSync(dataDir, { recursive: true });
 store.persist(out);
 console.log(`✓ wrote ${store.size} chunk(s) → data/index.json`);

@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { loadIndex } from "@/src/lib/loadIndex";
 import { retrieve } from "@/src/lib/retrieve";
-import { answerQuestion, isGrounded } from "@/src/lib/answer";
+import { answerQuestion } from "@/src/lib/answer";
+import { timed } from "@/src/lib/observe";
 
 // Needs node:fs to read the committed index.
 export const runtime = "nodejs";
@@ -49,14 +50,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  const hits = await retrieve(store, question, { k: 4 });
+  const { result: hits, ms: retrieveMs } = await timed(() => retrieve(store, question, { k: 4 }));
   const retrieval = hits.map((h) => ({
     source: h.chunk.source ?? h.chunk.id,
     score: Number(h.score.toFixed(3)),
     snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 240),
   }));
 
-  const result = await answerQuestion(question, hits);
+  // verify: true runs the output-side faithfulness check after generation.
+  const result = await answerQuestion(question, hits, { verify: true });
+
+  const f = result.faithfulness;
 
   return Response.json({
     grounded: result.grounded,
@@ -67,5 +71,20 @@ export async function POST(req: NextRequest): Promise<Response> {
       score: Number(c.score.toFixed(3)),
     })),
     retrieval,
+    faithfulness: f
+      ? {
+          verdict: f.verdict,
+          score: Number(f.score.toFixed(2)),
+          claims: f.claims,
+          unsupported: f.unsupported,
+        }
+      : null,
+    timings: {
+      retrieveMs,
+      generateMs: result.timings.generateMs,
+      verifyMs: result.timings.verifyMs,
+      totalMs: retrieveMs + result.timings.generateMs + result.timings.verifyMs,
+    },
+    usage: result.usage,
   });
 }

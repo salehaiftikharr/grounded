@@ -8,20 +8,56 @@ interface Hit {
   snippet: string;
 }
 
+interface ClaimCheck {
+  claim: string;
+  supported: boolean;
+  evidence: string;
+}
+
+interface Faithfulness {
+  verdict: "supported" | "partial" | "unsupported" | "skipped";
+  score: number;
+  claims: ClaimCheck[];
+  unsupported: string[];
+}
+
+interface Timings {
+  retrieveMs: number;
+  generateMs: number;
+  verifyMs: number;
+  totalMs: number;
+}
+
+interface TokenUsage {
+  input: number;
+  output: number;
+  total: number;
+}
+
 interface AskResult {
   grounded: boolean;
   topScore: number;
   answer: string;
   citations: { source: string; score: number }[];
   retrieval: Hit[];
+  faithfulness: Faithfulness | null;
+  timings: Timings;
+  usage: TokenUsage;
 }
 
 const EXAMPLES = [
   "What does the grounding gate do?",
+  "How does the faithfulness check catch hallucinations?",
   "Why does chunk overlap matter?",
-  "How does reranking improve retrieval?",
   "What is the capital of France?",
 ];
+
+const FAITH_LABEL: Record<Faithfulness["verdict"], { cls: string; text: (f: Faithfulness) => string }> = {
+  supported: { cls: "good", text: (f) => `✓ Answer verified · all ${f.claims.length} claims supported by sources` },
+  partial: { cls: "warn", text: (f) => `⚠ ${f.unsupported.length} of ${f.claims.length} claims not supported by sources` },
+  unsupported: { cls: "bad", text: () => "⊘ Answer not supported by the retrieved sources" },
+  skipped: { cls: "warn", text: () => "Faithfulness check skipped" },
+};
 
 export default function Home() {
   const [question, setQuestion] = useState("");
@@ -54,11 +90,15 @@ export default function Home() {
     }
   }
 
+  const faith = result?.faithfulness;
+  const faithMeta = faith && faith.verdict !== "skipped" ? FAITH_LABEL[faith.verdict] : null;
+
   return (
     <main className="wrap">
       <h1 className="brand">Grounded</h1>
       <p className="tagline">
-        Ask a question. It answers from the corpus with citations — or tells you it does not know.
+        Ask a question. It answers from the corpus with citations, verifies every claim against the
+        sources, and tells you when it does not know.
       </p>
 
       <div className="examples">
@@ -98,11 +138,14 @@ export default function Home() {
 
       {result && (
         <section className="result">
-          <span className={`badge ${result.grounded ? "good" : "warn"}`}>
-            {result.grounded
-              ? `✓ Grounded · top match ${result.topScore.toFixed(2)}`
-              : "⊘ Not grounded · refused to answer"}
-          </span>
+          <div className="badges">
+            <span className={`badge ${result.grounded ? "good" : "warn"}`}>
+              {result.grounded
+                ? `✓ Grounded · top match ${result.topScore.toFixed(2)}`
+                : "⊘ Not grounded · refused to answer"}
+            </span>
+            {faithMeta && <span className={`badge ${faithMeta.cls}`}>{faithMeta.text(faith!)}</span>}
+          </div>
 
           <div className="answer">{result.answer}</div>
 
@@ -110,6 +153,21 @@ export default function Home() {
             <p className="citations">
               <b>Sources:</b> {result.citations.map((c) => c.source).join(", ")}
             </p>
+          )}
+
+          {faith && faith.claims.length > 0 && (
+            <>
+              <div className="section-label">Claim check (answer verified against sources)</div>
+              {faith.claims.map((c, i) => (
+                <div className={`claim ${c.supported ? "ok" : "bad"}`} key={i}>
+                  <div className="claim-head">
+                    <span className="claim-mark">{c.supported ? "✓" : "✗"}</span>
+                    <span className="claim-text">{c.claim}</span>
+                  </div>
+                  {c.evidence && <div className="claim-evidence">“{c.evidence}”</div>}
+                </div>
+              ))}
+            </>
           )}
 
           <div className="section-label">
@@ -129,12 +187,19 @@ export default function Home() {
               <div className="hit-snippet">{h.snippet}…</div>
             </div>
           ))}
+
+          <div className="trace">
+            <span>retrieve {result.timings.retrieveMs}ms</span>
+            <span>generate {result.timings.generateMs}ms</span>
+            <span>verify {result.timings.verifyMs}ms</span>
+            <span>{result.usage.total} tokens</span>
+          </div>
         </section>
       )}
 
       <p className="foot">
-        Grounded retrieves locally and only calls the model to answer; the grounding gate refuses
-        when retrieval is too weak.{" "}
+        Grounded guards both ends: it refuses when retrieval is too weak, and verifies every claim in
+        the answer against the sources before trusting it.{" "}
         <a href="https://github.com/salehaiftikharr/grounded" target="_blank" rel="noreferrer">
           Source on GitHub
         </a>

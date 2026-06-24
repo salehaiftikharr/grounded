@@ -9,6 +9,7 @@
   --accent-grad: linear-gradient(135deg, #6ea8fe 0%, #8b7cff 100%);
   --good: #2bd576;
   --warn: #ffb02e;
+  --bad: #ff5c6c;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -85,6 +86,10 @@ body {
 }
 .badge.good { background: rgba(43, 213, 118, 0.14); color: var(--good); border: 1px solid rgba(43, 213, 118, 0.3); }
 .badge.warn { background: rgba(255, 176, 46, 0.14); color: var(--warn); border: 1px solid rgba(255, 176, 46, 0.3); }
+.badge.bad { background: rgba(255, 92, 108, 0.14); color: var(--bad); border: 1px solid rgba(255, 92, 108, 0.3); }
+
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.badges .badge { margin-bottom: 0; }
 
 .answer {
   background: var(--panel);
@@ -118,6 +123,35 @@ body {
 .bar { height: 5px; background: var(--border); border-radius: 999px; overflow: hidden; margin: 6px 0 9px; }
 .bar > span { display: block; height: 100%; background-image: var(--accent-grad); }
 .hit-snippet { font-size: 0.83rem; color: var(--muted); }
+
+.claim {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 10px;
+  padding: 10px 13px;
+  margin-bottom: 8px;
+  background: var(--panel-2);
+}
+.claim.ok { border-left-color: var(--good); }
+.claim.bad { border-left-color: var(--bad); }
+.claim-head { display: flex; gap: 9px; align-items: baseline; }
+.claim-mark { font-weight: 700; }
+.claim.ok .claim-mark { color: var(--good); }
+.claim.bad .claim-mark { color: var(--bad); }
+.claim-text { font-size: 0.9rem; }
+.claim-evidence { font-size: 0.8rem; color: var(--muted); margin-top: 5px; padding-left: 18px; font-style: italic; }
+
+.trace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 
 .error { color: var(--warn); margin-top: 20px; }
 .foot { margin-top: 40px; color: var(--muted); font-size: 0.8rem; }
