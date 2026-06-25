@@ -182,6 +182,7 @@ body {
 .claim.ok .claim-mark { color: var(--good); }
 .claim.bad .claim-mark { color: var(--bad); }
 .claim-text { font-size: 0.9rem; flex: 1; }
+.claim.bad .claim-text { text-decoration: line-through; text-decoration-color: var(--bad); opacity: 0.72; }
 .claim-src {
   font-size: 0.7rem;
   color: var(--accent);

@@ -24,6 +24,11 @@ import type { SearchHit } from "./store";
  *    shifts the signal from "a model agreed" to "a model pointed at text that
  *    provably exists," and catches a checker that hallucinates its own evidence.
  *
+ * Be precise about what the mechanical step does and does not buy: it hardens that
+ * the quote is REAL, not that the quote ENTAILS the claim. Whether the cited span
+ * actually supports the statement is still a model judgment — the substring check
+ * removes one failure mode (fabricated evidence), not the harder entailment one.
+ *
  * Scope, stated honestly: this measures faithfulness to the RETRIEVED EVIDENCE,
  * not truth. If retrieval surfaces a chunk that is similar-but-wrong, an answer
  * can be perfectly faithful to it and still false. The grounding gate and the
@@ -145,9 +150,18 @@ export async function verifyFaithfulness(
     prompt: `CONTEXT:\n${context}\n\nANSWER:\n${answer}\n\nJudge each claim in the answer against the context.`,
   });
 
+  // Overlapping chunks mean a supporting span can straddle a chunk boundary —
+  // present in the retrieved set but not contiguous within any single chunk. So
+  // if no single chunk contains the quote, fall back to the joined retrieved text
+  // before dropping the claim. (sourceIndex stays null when only the join matches,
+  // since there is no single chunk to point the highlight at.)
+  const joined = chunkTexts.join("\n\n");
   const claims: ClaimCheck[] = object.claims.map((c) => {
-    const sourceIndex = c.supported ? locateEvidence(c.evidence, chunkTexts) : null;
-    return { ...c, evidenceLocated: sourceIndex !== null, sourceIndex };
+    if (!c.supported) return { ...c, evidenceLocated: false, sourceIndex: null };
+    const sourceIndex = locateEvidence(c.evidence, chunkTexts);
+    if (sourceIndex !== null) return { ...c, evidenceLocated: true, sourceIndex };
+    const acrossSet = locateEvidence(c.evidence, [joined]) !== null;
+    return { ...c, evidenceLocated: acrossSet, sourceIndex: null };
   });
   const { verdict, score, unsupported } = summarize(claims);
   return { verdict, score, claims, unsupported, usage: normalizeUsage(usage) };

@@ -235,12 +235,15 @@ export default function Home() {
                         <div className="claim-head">
                           <span className="claim-mark">{verified ? "✓" : "✗"}</span>
                           <span className="claim-text">{c.claim}</span>
-                          {verified && c.sourceIndex && (
-                            <span className="claim-src">verified in [{c.sourceIndex}]</span>
+                          {verified && (
+                            <span className="claim-src">
+                              verified in {c.sourceIndex ? `[${c.sourceIndex}]` : "sources"}
+                            </span>
                           )}
                           {c.supported && !c.evidenceLocated && (
-                            <span className="claim-src warn">quote not located</span>
+                            <span className="claim-src warn">quote not in sources</span>
                           )}
+                          {!c.supported && <span className="claim-src warn">not supported</span>}
                         </div>
                         {c.evidence && <div className="claim-evidence">“{c.evidence}”</div>}
                       </div>

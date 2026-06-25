@@ -43,6 +43,13 @@ export interface EvalReport {
   adversarial: { refused: number; total: number };
   /** Mean faithfulness over answered in-corpus cases; null when not measured. */
   faithfulness: { mean: number; total: number } | null;
+  /**
+   * How often a claim the checker judged supported also had its quote located in
+   * a source. A low rate would mean the verbatim-substring requirement is dropping
+   * legitimately-supported claims (false unsupported) — the cost of the mechanical
+   * check, measured rather than assumed. null when faithfulness was not run.
+   */
+  quoteLocation: { located: number; supported: number; rate: number } | null;
   /** Hard pass: retrieval hits + clear refusals all correct. */
   passed: boolean;
 }
@@ -54,6 +61,8 @@ export async function evaluate(
   const cases = opts.cases ?? defaultCases;
   const log = opts.onLog ?? (() => {});
   const results: EvalResult[] = [];
+  let supportedClaims = 0;
+  let locatedClaims = 0;
 
   for (const c of cases) {
     log(`asking "${c.question}"…`);
@@ -81,6 +90,12 @@ export async function evaluate(
         candidateScores,
       });
       faithfulness = answer.faithfulness?.score;
+      for (const cl of answer.faithfulness?.claims ?? []) {
+        if (cl.supported) {
+          supportedClaims++;
+          if (cl.evidenceLocated) locatedClaims++;
+        }
+      }
     }
 
     results.push({
@@ -118,6 +133,9 @@ export async function evaluate(
     refusal: { correct: refusedClear, total: clearOut.length },
     adversarial: { refused: refusedAdversarial, total: adversarialOut.length },
     faithfulness,
+    quoteLocation: faithfulness
+      ? { located: locatedClaims, supported: supportedClaims, rate: supportedClaims ? locatedClaims / supportedClaims : 1 }
+      : null,
     passed: retrievalHits === inCorpus.length && refusedClear === clearOut.length,
   };
 }

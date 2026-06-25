@@ -55,7 +55,7 @@ I don't have enough grounded information in the corpus to answer that confidentl
 - **Ingest** (`src/ingest.ts`, `src/chunk.ts`) — split docs into overlapping chunks, embed them, persist to a JSON vector store.
 - **Retrieve** (`src/retrieve.ts`) — embed the query, vector-search a wide candidate set, then **rerank** by blending cosine score with lexical overlap (a cheap stand-in for a cross-encoder reranker, which slots in at the same seam).
 - **Ground & answer** (`src/answer.ts`) — the **grounding gate** (`isGrounded`) checks hit count and top similarity; only if it passes does the LLM generate an answer constrained to the retrieved context, with inline citations.
-- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context. This catches the model drifting past its sources even when retrieval succeeded. Three things keep the check from rubber-stamping: the checker is a **different model** from the generator (shared weights share blind spots); it is prompted **adversarially** (assume unsupported until proven); and — most importantly — each supporting quote is **mechanically verified to be an actual substring of a retrieved chunk**. A claim only counts as supported if its quote provably exists, so the signal is "a model pointed at text that is really there," not "a model agreed." That substring match is also what locates the exact sentence the UI highlights.
+- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context. This catches the model drifting past its sources even when retrieval succeeded. Three things keep the check from rubber-stamping: the checker is a **different model** from the generator (shared weights share blind spots); it is prompted **adversarially** (assume unsupported until proven); and each supporting quote is **mechanically verified to be an actual substring of a retrieved chunk** — a claim only counts if its quote provably exists, so the signal is "a model pointed at text that is really there," not "a model agreed." (That same substring match locates the sentence the UI highlights.) Precise about the limit: the mechanical step hardens that the quote is *real*, not that it *entails* the claim — whether the cited span actually supports the statement remains a model judgment.
 - **Observe** (`src/observe.ts`) — every request reports where the time went (retrieve / generate / verify) and how many tokens it cost, surfaced in the CLI and the web UI.
 
 ## Why two gates
@@ -95,9 +95,19 @@ Refused clear out-of-corpus: 2/2
 Refused adversarial near-miss (gate alone): 3/4
   note: this leak is caught at GENERATION, not by the faithfulness gate
   (see the honest accounting below).
+Mean faithfulness (12 answered): 99%
+Quote-location rate (supported claims with a verbatim source span): 76/77 (99%)
 
 ✓ PASS (retrieval hits + clear refusals)
 ```
+
+That last line measures the cost of the mechanical check rather than assuming it:
+of the 77 claims the checker judged supported, 76 had their quote located verbatim
+in a source. A verbatim-substring requirement risks **false unsupported** when
+support is split across sentences or straddles a chunk boundary, so the rate is
+reported, not hand-waved (the locator also falls back to the joined retrieved text
+to handle the boundary case). At 99% on this corpus the requirement is cheap, but
+that number should be re-checked on any corpus with heavier paraphrase.
 
 Two things this surfaced, both kept honestly rather than tuned away:
 
@@ -116,6 +126,29 @@ Two things this surfaced, both kept honestly rather than tuned away:
   mechanical quote check drops any claim whose evidence is not a verbatim substring
   of a source, regardless of what the checker model says.
 
+### Watch the second gate fire
+Because the generator is well-behaved (it refuses rather than over-reaches), the
+clearest way to *see* the faithfulness check work is to hand it an answer directly.
+`grounded verify` runs only the output gate on an answer you supply:
+
+```
+$ npm run grounded verify "What does the grounding gate do?" \
+    "The grounding gate runs before generation and refuses when retrieval is too weak.
+     It uses a fixed cosine threshold of 0.82 and a neural reranker trained on user clicks."
+
+Verdict: partial — 2/4 claims hold up (50%)
+
+  ✓ The grounding gate runs before generation
+      ↳ verified in [2]: "The grounding gate is a guardrail that runs before generation."
+  ✓ The grounding gate refuses when retrieval is too weak
+      ↳ verified in [2]: "If retrieval is weak, the gate refuses..."
+  ✗ DROPPED: It uses a fixed cosine threshold of 0.82
+  ✗ DROPPED: It uses a neural reranker trained on user clicks
+```
+
+The two real claims are verified against a located quote; the two plausible-but-
+fabricated ones are dropped. In the web UI, dropped claims show struck-through.
+
 **Where the relative gate is weak (known, not hidden).** It assumes a real match
 *stands out* from the candidate distribution, which breaks in two common cases:
 **near-duplicate chunks** (boilerplate, repeated headers) mean even a perfect match
@@ -133,7 +166,8 @@ cp .env.example .env          # add OPENAI_API_KEY (embeddings) + ANTHROPIC_API_
 
 npm run grounded ingest            # index ./corpus into index.json
 npm run grounded ask "What is reranking?"
-npm run grounded eval
+npm run grounded verify "What is reranking?" "Reranking re-scores candidates."
+npm run grounded eval -- --verify  # also measures faithfulness + quote-location
 ```
 
 `npm test` runs the unit tests for the deterministic core (chunking, cosine

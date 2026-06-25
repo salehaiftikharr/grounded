@@ -4,6 +4,8 @@
  *   grounded ingest [dir]      index a corpus of .md/.txt files (default: ./corpus)
  *   grounded ask "<question>"  answer from the indexed corpus, with citations and
  *                              a faithfulness check, or refuse if not grounded
+ *   grounded verify "<q>" "<answer>"  run only the faithfulness check on a supplied
+ *                              answer — watch unsupported claims get dropped
  *   grounded eval              grade retrieval hit-rate and grounding discipline
  *
  *   --provider anthropic|openai   override LLM_PROVIDER for generation
@@ -15,6 +17,7 @@ import { loadEnv } from "./env";
 import { ingestDir } from "./lib/ingest";
 import { retrieve } from "./lib/retrieve";
 import { answerQuestion } from "./lib/answer";
+import { verifyFaithfulness } from "./lib/faithfulness";
 import { VectorStore } from "./lib/store";
 import { evaluate } from "./lib/eval/grade";
 
@@ -94,6 +97,34 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "verify": {
+      // Run ONLY the output-side faithfulness check on an answer you supply, so
+      // the second gate can be seen firing: paste a plausible-but-unsupported
+      // claim and watch it get dropped, independent of the generator.
+      const q = rest[0]?.trim();
+      const ans = rest[1]?.trim();
+      if (!q || !ans) fail('Usage: grounded verify "<question>" "<answer to check>"');
+      const store = VectorStore.load(INDEX);
+      if (!store.size) fail("No index yet. Run: npm run grounded ingest");
+      const { hits } = await retrieve(store, q);
+      const f = await verifyFaithfulness(ans, hits, { provider });
+      const supported = f.claims.length - f.unsupported.length;
+      console.log(`\nVerdict: ${f.verdict} — ${supported}/${f.claims.length} claims hold up (${(f.score * 100).toFixed(0)}%)\n`);
+      for (const c of f.claims) {
+        const verified = c.supported && c.evidenceLocated;
+        if (verified) {
+          console.log(`  ✓ ${c.claim}`);
+          console.log(`      ↳ verified in [${c.sourceIndex ?? "sources"}]: "${c.evidence}"`);
+        } else {
+          console.log(`  ✗ DROPPED: ${c.claim}`);
+          if (c.supported && !c.evidenceLocated) {
+            console.log(`      ↳ checker offered "${c.evidence}" but that text is not in any source`);
+          }
+        }
+      }
+      break;
+    }
+
     case "eval": {
       const store = VectorStore.load(INDEX);
       if (!store.size) fail("No index yet. Run: npm run grounded ingest");
@@ -137,6 +168,12 @@ async function main(): Promise<void> {
           `Mean faithfulness (${report.faithfulness.total} answered): ${(report.faithfulness.mean * 100).toFixed(0)}%`,
         );
       }
+      if (report.quoteLocation) {
+        const q = report.quoteLocation;
+        console.log(
+          `Quote-location rate (supported claims with a verbatim source span): ${q.located}/${q.supported} (${(q.rate * 100).toFixed(0)}%)`,
+        );
+      }
       console.log(`\n${report.passed ? "✓ PASS" : "✗ FAIL"} (retrieval hits + clear refusals)`);
       process.exitCode = report.passed ? 0 : 1;
       break;
@@ -147,9 +184,10 @@ async function main(): Promise<void> {
         [
           "Grounded — a retrieval Q&A agent that cites sources and refuses when ungrounded.",
           "",
-          "  grounded ingest [dir]      index a corpus of .md/.txt files (default: ./corpus)",
-          '  grounded ask "<question>"  answer with citations + a faithfulness check, or refuse',
-          "  grounded eval              grade retrieval hit-rate and grounding discipline",
+          "  grounded ingest [dir]               index .md/.txt files (default: ./corpus)",
+          '  grounded ask "<question>"           answer with citations + a faithfulness check, or refuse',
+          '  grounded verify "<q>" "<answer>"    run only the faithfulness check on an answer you supply',
+          "  grounded eval                       grade retrieval hit-rate and grounding discipline",
           "",
           "  --provider anthropic|openai   override the generation provider",
           "  --no-verify                   (ask) skip the faithfulness check",
