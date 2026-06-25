@@ -55,7 +55,7 @@ I don't have enough grounded information in the corpus to answer that confidentl
 - **Ingest** (`src/ingest.ts`, `src/chunk.ts`) — split docs into overlapping chunks, embed them, persist to a JSON vector store.
 - **Retrieve** (`src/retrieve.ts`) — embed the query, vector-search a wide candidate set, then **rerank** by blending cosine score with lexical overlap (a cheap stand-in for a cross-encoder reranker, which slots in at the same seam).
 - **Ground & answer** (`src/answer.ts`) — the **grounding gate** (`isGrounded`) checks hit count and top similarity; only if it passes does the LLM generate an answer constrained to the retrieved context, with inline citations.
-- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context, returning a per-claim verdict and an overall faithfulness score. This catches the model drifting past its sources even when retrieval succeeded. The checker is deliberately a **different model** from the generator (a generator and checker from the same weights share blind spots) and is prompted **adversarially** — assume each claim is unsupported until the context proves it.
+- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context. This catches the model drifting past its sources even when retrieval succeeded. Three things keep the check from rubber-stamping: the checker is a **different model** from the generator (shared weights share blind spots); it is prompted **adversarially** (assume unsupported until proven); and — most importantly — each supporting quote is **mechanically verified to be an actual substring of a retrieved chunk**. A claim only counts as supported if its quote provably exists, so the signal is "a model pointed at text that is really there," not "a model agreed." That substring match is also what locates the exact sentence the UI highlights.
 - **Observe** (`src/observe.ts`) — every request reports where the time went (retrieve / generate / verify) and how many tokens it cost, surfaced in the CLI and the web UI.
 
 ## Why two gates
@@ -93,8 +93,8 @@ $ npm run grounded eval
 Retrieval hit-rate: 12/12 (100%)
 Refused clear out-of-corpus: 2/2
 Refused adversarial near-miss (gate alone): 3/4
-  note: gate leaks here are caught downstream — the generator answers
-  "I don't know" and the faithfulness check confirms it.
+  note: this leak is caught at GENERATION, not by the faithfulness gate
+  (see the honest accounting below).
 
 ✓ PASS (retrieval hits + clear refusals)
 ```
@@ -107,9 +107,23 @@ Two things this surfaced, both kept honestly rather than tuned away:
   that does not transfer across corpora), with a low absolute floor as a backstop.
 - **One near-miss still passes the gate** ("which vector database is fastest at
   billion-scale search?") because it shares too much vocabulary with the retrieval
-  doc. That is the case the gate *cannot* catch alone — and exactly why the layers
-  behind it exist: the generator answers "I do not know," and the faithfulness
-  check confirms what it did say. Defense in depth, shown rather than hidden.
+  doc — "distinctive" is not "relevant." Being precise about what catches it: the
+  **generator** answers "I do not know" from the vocab-similar chunks. That is the
+  generator's own discretion — the very LLM-judgment this system tries not to lean
+  on — *not* the faithfulness gate, which never fires because no claim is produced
+  to check. So this case demonstrates the generator behaving well, not the second
+  gate working. The faithfulness gate's real guarantee is shown elsewhere: the
+  mechanical quote check drops any claim whose evidence is not a verbatim substring
+  of a source, regardless of what the checker model says.
+
+**Where the relative gate is weak (known, not hidden).** It assumes a real match
+*stands out* from the candidate distribution, which breaks in two common cases:
+**near-duplicate chunks** (boilerplate, repeated headers) mean even a perfect match
+does not stand out, causing false refusals; and a **semantically narrow corpus**
+(everything similar) flattens the distribution the same way. In both, the absolute
+floor is doing the load-bearing work, and the relative term mainly helps the
+"everything is weak but one is weakly-best" regime. It is a real improvement for
+cross-corpus transfer, not a universal fix.
 
 ## Run it
 

@@ -55,7 +55,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   const retrieval = hits.map((h) => ({
     source: h.chunk.source ?? h.chunk.id,
     score: Number(h.score.toFixed(3)),
-    snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 240),
+    // Full (normalized) chunk text, capped — the UI highlights the supporting
+    // span inside it, so it needs more than a 240-char teaser.
+    snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 600),
   }));
 
   // verify: true runs the output-side faithfulness check after generation;

@@ -12,6 +12,8 @@ interface ClaimCheck {
   claim: string;
   supported: boolean;
   evidence: string;
+  evidenceLocated: boolean;
+  sourceIndex: number | null;
 }
 
 interface Faithfulness {
@@ -66,6 +68,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [showDetails, setShowDetails] = useState(false);
   const [activeCite, setActiveCite] = useState<number | null>(null);
+  const [activeEvidence, setActiveEvidence] = useState<string | null>(null);
 
   async function ask(q: string) {
     const query = q.trim();
@@ -75,6 +78,7 @@ export default function Home() {
     setResult(null);
     setShowDetails(false);
     setActiveCite(null);
+    setActiveEvidence(null);
     try {
       const res = await fetch("/api/ask", {
         method: "POST",
@@ -94,14 +98,32 @@ export default function Home() {
     }
   }
 
-  // Click a citation in the answer → highlight the matching retrieved chunk and
-  // reveal the details panel so the source it came from is actually visible.
-  function focusCitation(n: number) {
+  // Click a citation or a claim → reveal details, highlight the matching chunk,
+  // optionally highlight the exact supporting sentence, and scroll it into view.
+  function focus(n: number | null, evidence: string | null = null) {
     setShowDetails(true);
     setActiveCite(n);
-    requestAnimationFrame(() => {
-      document.getElementById(`hit-${n}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+    setActiveEvidence(evidence);
+    if (n != null) {
+      requestAnimationFrame(() => {
+        document.getElementById(`hit-${n}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+  }
+
+  // Wrap the located supporting span in a <mark> so the source sentence stands out.
+  function highlightSnippet(text: string, evidence: string | null) {
+    if (!evidence) return text;
+    const needle = evidence.replace(/\s+/g, " ").trim();
+    const idx = text.toLowerCase().indexOf(needle.toLowerCase());
+    if (idx === -1 || needle.length < 8) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="ev">{text.slice(idx, idx + needle.length)}</mark>
+        {text.slice(idx + needle.length)}
+      </>
+    );
   }
 
   // Render the answer with [1], [2]… turned into clickable superscripts.
@@ -114,7 +136,7 @@ export default function Home() {
         <button
           key={i}
           className={`cite ${activeCite === n ? "active" : ""}`}
-          onClick={() => focusCitation(n)}
+          onClick={() => focus(n)}
           title={`Show source [${n}]`}
         >
           {n}
@@ -199,17 +221,31 @@ export default function Home() {
               {faith && faith.claims.length > 0 && (
                 <>
                   <div className="section-label">
-                    Claim check — each statement verified against the sources by a separate model
+                    Claim check — a separate model judges each statement, then its quote is verified
+                    to exist in a source. Click a verified claim to see the exact sentence.
                   </div>
-                  {faith.claims.map((c, i) => (
-                    <div className={`claim ${c.supported ? "ok" : "bad"}`} key={i}>
-                      <div className="claim-head">
-                        <span className="claim-mark">{c.supported ? "✓" : "✗"}</span>
-                        <span className="claim-text">{c.claim}</span>
+                  {faith.claims.map((c, i) => {
+                    const verified = c.supported && c.evidenceLocated;
+                    return (
+                      <div
+                        className={`claim ${verified ? "ok" : "bad"} ${verified ? "clickable" : ""}`}
+                        key={i}
+                        onClick={() => verified && c.sourceIndex && focus(c.sourceIndex, c.evidence)}
+                      >
+                        <div className="claim-head">
+                          <span className="claim-mark">{verified ? "✓" : "✗"}</span>
+                          <span className="claim-text">{c.claim}</span>
+                          {verified && c.sourceIndex && (
+                            <span className="claim-src">verified in [{c.sourceIndex}]</span>
+                          )}
+                          {c.supported && !c.evidenceLocated && (
+                            <span className="claim-src warn">quote not located</span>
+                          )}
+                        </div>
+                        {c.evidence && <div className="claim-evidence">“{c.evidence}”</div>}
                       </div>
-                      {c.evidence && <div className="claim-evidence">“{c.evidence}”</div>}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </>
               )}
 
@@ -227,7 +263,9 @@ export default function Home() {
                   <div className="bar">
                     <span style={{ width: `${Math.max(0, Math.min(100, h.score * 100))}%` }} />
                   </div>
-                  <div className="hit-snippet">{h.snippet}…</div>
+                  <div className="hit-snippet">
+                    {highlightSnippet(h.snippet, activeCite === i + 1 ? activeEvidence : null)}…
+                  </div>
                 </div>
               ))}
 
@@ -243,9 +281,10 @@ export default function Home() {
       )}
 
       <p className="foot">
-        Grounded guards both ends: it refuses when retrieval is too weak, and verifies every claim in
-        the answer against the sources before trusting it. Faithfulness here means faithful to the
-        retrieved evidence, which assumes retrieval surfaced the right sources.{" "}
+        Grounded guards both ends: it refuses when retrieval is too weak, and every claim that gets
+        through is checked against the sources — its supporting quote has to actually exist in a
+        retrieved chunk. Faithful here means faithful to the retrieved evidence, which assumes
+        retrieval surfaced the right sources.{" "}
         <a href="https://github.com/salehaiftikharr/grounded" target="_blank" rel="noreferrer">
           Source on GitHub
         </a>

@@ -127,7 +127,9 @@ async function main(): Promise<void> {
       );
       if (report.adversarial.refused < report.adversarial.total) {
         console.log(
-          "  note: gate leaks here are caught downstream — the generator answers \"I don't know\" and the faithfulness check confirms it.",
+          "  note: this leak is caught at GENERATION — the generator answers \"I don't know\" from\n" +
+            "  the vocab-similar chunks (its own discretion, not the faithfulness gate). The mechanical\n" +
+            "  faithfulness check fires only once a plausible answer is actually produced.",
         );
       }
       if (report.faithfulness) {

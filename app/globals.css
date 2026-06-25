@@ -175,12 +175,25 @@ body {
 }
 .claim.ok { border-left-color: var(--good); }
 .claim.bad { border-left-color: var(--bad); }
+.claim.clickable { cursor: pointer; transition: background 0.12s ease; }
+.claim.clickable:hover { background: var(--panel); }
 .claim-head { display: flex; gap: 9px; align-items: baseline; }
 .claim-mark { font-weight: 700; }
 .claim.ok .claim-mark { color: var(--good); }
 .claim.bad .claim-mark { color: var(--bad); }
-.claim-text { font-size: 0.9rem; }
+.claim-text { font-size: 0.9rem; flex: 1; }
+.claim-src {
+  font-size: 0.7rem;
+  color: var(--accent);
+  white-space: nowrap;
+  border: 1px solid rgba(110, 168, 254, 0.35);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.claim-src.warn { color: var(--warn); border-color: rgba(255, 176, 46, 0.35); }
 .claim-evidence { font-size: 0.8rem; color: var(--muted); margin-top: 5px; padding-left: 18px; font-style: italic; }
+
+mark.ev { background: rgba(255, 224, 130, 0.28); color: var(--text); border-radius: 3px; padding: 0 2px; }
 
 .trace {
   display: flex;
