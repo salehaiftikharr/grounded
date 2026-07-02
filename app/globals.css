@@ -208,6 +208,30 @@ mark.ev { background: rgba(255, 224, 130, 0.28); color: var(--text); border-radi
   font-variant-numeric: tabular-nums;
 }
 
+/* Voice layer controls — ElevenLabs mic + spoken answer. */
+.voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.voice-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.voice-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.voice-btn.mic { padding: 0 15px; align-self: stretch; }
+.voice-btn.mic.listening { border-color: var(--bad); color: var(--bad); background: rgba(255, 92, 108, 0.12); }
+.voice-btn.speak { padding: 5px 11px; }
+.voice-btn.speak.speaking { border-color: var(--accent); color: var(--accent); }
+.voice-speak { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; }
+.voice-error { font-size: 0.72rem; color: var(--warn); margin-left: 8px; }
+
 .error { color: var(--warn); margin-top: 20px; }
 .foot { margin-top: 40px; color: var(--muted); font-size: 0.8rem; }
 .foot a { color: var(--accent); text-decoration: none; }

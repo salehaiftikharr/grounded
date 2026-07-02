@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MicButton, SpeakAnswer } from "./components/VoiceControls";
 
 interface Hit {
   source: string;
@@ -184,6 +185,13 @@ export default function Home() {
           placeholder="Ask about chunking, embeddings, retrieval, grounding…"
           maxLength={500}
         />
+        <MicButton
+          onQuestion={(q) => {
+            setQuestion(q);
+            void ask(q);
+          }}
+          disabled={loading}
+        />
         <button type="submit" disabled={loading || !question.trim()}>
           {loading ? "Thinking…" : "Ask"}
         </button>
@@ -200,6 +208,7 @@ export default function Home() {
                 : "⊘ Not grounded · refused to answer"}
             </span>
             {faithMeta && <span className={`badge ${faithMeta.cls}`}>{faithMeta.text(faith!)}</span>}
+            <SpeakAnswer text={result.answer} />
           </div>
 
           <div className="answer">{renderAnswer(result.answer)}</div>
