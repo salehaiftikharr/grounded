@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { MicButton, SpeakAnswer } from "./components/VoiceControls";
+import { CorpusPanel, type CorpusState } from "./components/CorpusPanel";
 
 interface Hit {
   source: string;
@@ -70,6 +71,7 @@ export default function Home() {
   const [showDetails, setShowDetails] = useState(false);
   const [activeCite, setActiveCite] = useState<number | null>(null);
   const [activeEvidence, setActiveEvidence] = useState<string | null>(null);
+  const [corpus, setCorpus] = useState<CorpusState>({ type: "default", sources: [] });
 
   async function ask(q: string) {
     const query = q.trim();
@@ -157,20 +159,32 @@ export default function Home() {
         sources, and tells you when it does not know.
       </p>
 
-      <div className="examples">
-        {EXAMPLES.map((ex) => (
-          <button
-            key={ex}
-            className="chip"
-            onClick={() => {
-              setQuestion(ex);
-              void ask(ex);
-            }}
-          >
-            {ex}
-          </button>
-        ))}
-      </div>
+      <CorpusPanel
+        corpus={corpus}
+        busy={loading}
+        onCorpusChange={(next) => {
+          setCorpus(next);
+          setResult(null);
+          setError("");
+        }}
+      />
+
+      {corpus.type === "default" && (
+        <div className="examples">
+          {EXAMPLES.map((ex) => (
+            <button
+              key={ex}
+              className="chip"
+              onClick={() => {
+                setQuestion(ex);
+                void ask(ex);
+              }}
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
 
       <form
         className="ask"

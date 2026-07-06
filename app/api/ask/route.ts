@@ -1,8 +1,10 @@
 import type { NextRequest } from "next/server";
 import { loadIndex } from "@/src/lib/loadIndex";
-import { retrieve } from "@/src/lib/retrieve";
+import { retrieve, retrieveFromSession } from "@/src/lib/retrieve";
 import { answerQuestion } from "@/src/lib/answer";
 import { timed } from "@/src/lib/observe";
+import { readSessionId } from "@/src/lib/session";
+import { sessionChunkCount } from "@/src/lib/db";
 
 // Needs node:fs to read the committed index.
 export const runtime = "nodejs";
@@ -42,15 +44,33 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  const store = loadIndex();
-  if (!store.size) {
-    return Response.json(
-      { error: "The index has not been built. Run `npm run precompute`." },
-      { status: 503 },
-    );
+  // Pick the corpus: a visitor's uploaded document (namespaced by session) if
+  // they have one, otherwise the built-in demo corpus. Reading the session count
+  // is best-effort — if no database is configured we simply use the demo corpus,
+  // so the default experience never depends on the upload feature.
+  const sessionId = readSessionId(req);
+  let uploadedCount = 0;
+  if (sessionId) {
+    uploadedCount = await sessionChunkCount(sessionId).catch(() => 0);
+  }
+  const usingUpload = uploadedCount > 0;
+
+  let store: ReturnType<typeof loadIndex> | null = null;
+  if (!usingUpload) {
+    store = loadIndex();
+    if (!store.size) {
+      return Response.json(
+        { error: "The index has not been built. Run `npm run precompute`." },
+        { status: 503 },
+      );
+    }
   }
 
-  const { result: retrieved, ms: retrieveMs } = await timed(() => retrieve(store, question, { k: 4 }));
+  const { result: retrieved, ms: retrieveMs } = await timed(() =>
+    usingUpload
+      ? retrieveFromSession(sessionId as string, question, { k: 4 })
+      : retrieve(store!, question, { k: 4 }),
+  );
   const { hits, candidateScores } = retrieved;
   const retrieval = hits.map((h) => ({
     source: h.chunk.source ?? h.chunk.id,
@@ -68,6 +88,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   return Response.json({
     grounded: result.grounded,
+    corpus: usingUpload ? "upload" : "default",
     topScore: retrieval[0]?.score ?? 0,
     answer: result.text,
     citations: result.citations.map((c) => ({

@@ -1,5 +1,6 @@
 import { VectorStore, type SearchHit } from "./store";
 import { embedQuery } from "./embed";
+import { searchSessionChunks } from "./db";
 
 /** Significant query terms (lowercased, de-duped, short tokens dropped). */
 export function queryTerms(text: string): string[] {
@@ -53,6 +54,29 @@ export async function retrieve(
   const candidates = opts.candidates ?? Math.max(k * 4, 12);
   const queryEmbedding = await embedQuery(query);
   const hits = store.search(queryEmbedding, candidates);
+  return finalize(query, hits, k);
+}
+
+/**
+ * The same query half of RAG, but over a session's uploaded corpus in Postgres.
+ * The candidate search runs in the database (pgvector), then the identical
+ * rerank and relative grounding baseline apply, so bring-your-own-document
+ * answers pass through exactly the same gates as the built-in corpus.
+ */
+export async function retrieveFromSession(
+  sessionId: string,
+  query: string,
+  opts: { k?: number; candidates?: number } = {},
+): Promise<Retrieval> {
+  const k = opts.k ?? 4;
+  const candidates = opts.candidates ?? Math.max(k * 4, 12);
+  const queryEmbedding = await embedQuery(query);
+  const hits = await searchSessionChunks(sessionId, queryEmbedding, candidates);
+  return finalize(query, hits, k);
+}
+
+/** Rerank a candidate set and split into the top-k plus the score baseline. */
+function finalize(query: string, hits: SearchHit[], k: number): Retrieval {
   const reranked = rerank(query, hits);
   return { hits: reranked.slice(0, k), candidateScores: reranked.map((h) => h.score) };
 }
