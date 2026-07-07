@@ -95,7 +95,7 @@ export default function Home() {
       }
       setResult(data as AskResult);
     } catch {
-      setError("Network error — please try again.");
+      setError("Network error. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -155,8 +155,8 @@ export default function Home() {
     <main className="wrap">
       <h1 className="brand">Grounded</h1>
       <p className="tagline">
-        Ask a question. It answers from the corpus with citations, checks every claim against the
-        sources, and tells you when it does not know.
+        A question-answering agent that cites its sources, checks every claim, and refuses to bluff
+        when it does not know.
       </p>
 
       <CorpusPanel
@@ -171,6 +171,7 @@ export default function Home() {
 
       {corpus.type === "default" && (
         <div className="examples">
+          <span className="examples-lead">Try one</span>
           {EXAMPLES.map((ex) => (
             <button
               key={ex}
@@ -235,7 +236,7 @@ export default function Home() {
 
           {result.grounded && (
             <button className="toggle" onClick={() => setShowDetails((v) => !v)}>
-              {showDetails ? "▾ Hide details" : "▸ Show details — claim check, retrieval, trace"}
+              {showDetails ? "▾ Hide the work" : "▸ Show the work: claim check, retrieval, trace"}
             </button>
           )}
 
@@ -244,8 +245,8 @@ export default function Home() {
               {faith && faith.claims.length > 0 && (
                 <>
                   <div className="section-label">
-                    Claim check — a separate model judges each statement, then its quote is verified
-                    to exist in a source. Click a verified claim to see the exact sentence.
+                    Claim check. A second model verifies each statement against a real quote in the
+                    sources. Click a verified claim to see it.
                   </div>
                   {faith.claims.map((c, i) => {
                     const verified = c.supported && c.evidenceLocated;
@@ -276,7 +277,7 @@ export default function Home() {
               )}
 
               <div className="section-label">
-                Retrieved context {result.grounded ? "(used to answer)" : "(too weak — gate refused)"}
+                Retrieved context {result.grounded ? "(used to answer)" : "(too weak, so the gate refused)"}
               </div>
               {result.retrieval.map((h, i) => (
                 <div className={`hit ${activeCite === i + 1 ? "active" : ""}`} id={`hit-${i + 1}`} key={i}>
@@ -307,12 +308,10 @@ export default function Home() {
       )}
 
       <p className="foot">
-        Grounded guards both ends: it refuses when retrieval is too weak, and every claim that gets
-        through is checked against the sources — its supporting quote has to actually exist in a
-        retrieved chunk. Faithful here means faithful to the retrieved evidence, which assumes
-        retrieval surfaced the right sources.{" "}
+        Two gates guard every answer: retrieval has to be strong enough to respond, and each claim
+        has to trace back to a real quote in the sources.{" "}
         <a href="https://github.com/salehaiftikharr/grounded" target="_blank" rel="noreferrer">
-          Source on GitHub
+          Source on GitHub →
         </a>
       </p>
     </main>

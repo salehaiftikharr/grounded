@@ -127,9 +127,9 @@ export function CorpusPanel({
       {open && (
         <div className="corpus-form">
           <p className="corpus-hint">
-            Upload a .pdf, .txt, or .md file, or paste text. It is indexed only for your session and
-            cleared after a day. Then ask a question it does cover, and one it does not, to watch the
-            grounding gate refuse.
+            Upload a PDF, TXT, or MD file, or paste text. It stays private to your session and
+            clears after a day. Then try a question it covers, and one it does not, and watch it
+            refuse.
           </p>
           <label className="corpus-file">
             <input

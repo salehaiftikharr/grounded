@@ -26,16 +26,24 @@ body {
 .wrap { max-width: 720px; margin: 0 auto; padding: 56px 20px 80px; }
 
 .brand {
-  font-size: 2rem;
+  font-size: 2.4rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  background-image: var(--accent-grad);
+  background-image: linear-gradient(100deg, #6ea8fe 0%, #8b7cff 45%, #6ea8fe 90%);
+  background-size: 220% auto;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+  animation: brand-shimmer 7s linear infinite;
+}
+@keyframes brand-shimmer {
+  to { background-position: 220% center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand { animation: none; }
 }
 
-.tagline { color: var(--muted); margin-top: 6px; }
+.tagline { color: var(--muted); margin-top: 8px; font-size: 1.05rem; max-width: 46ch; line-height: 1.5; }
 
 .examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 12px; }
 .chip {
@@ -48,7 +56,17 @@ body {
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.chip:hover { border-color: var(--accent); color: var(--text); }
+.chip:hover { border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
+.chip:active { transform: translateY(0); }
+
+.examples-lead {
+  align-self: center;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-right: 2px;
+}
 
 .ask { display: flex; gap: 10px; margin-top: 8px; }
 .ask input {
@@ -69,10 +87,24 @@ body {
   border-radius: 12px;
   padding: 0 22px;
   cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
+.ask button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 6px 18px rgba(110, 168, 254, 0.28);
+}
+.ask button:active:not(:disabled) { transform: translateY(0); }
 .ask button:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.result { margin-top: 28px; }
+.result { margin-top: 28px; animation: rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result { animation: none; }
+}
 
 .badge {
   display: inline-flex;
