@@ -87,6 +87,16 @@ export function isGrounded(
 const REFUSAL =
   "I don't have enough grounded information in the corpus to answer that confidently.";
 
+// Overview questions ("what is this about?", "summarize this", "key points")
+// barely match any single chunk on similarity, so similarity gating wrongly
+// refuses them even when the corpus obviously holds the answer. Detect them so
+// the answerer can ground on "a corpus exists" and summarize across it instead.
+export function isOverviewQuestion(question: string): boolean {
+  return /what(?:'?s| is| are)?\s+(?:this|it|the)\s+(?:(?:document|doc|book|text|file|handbook|paper|report|thing)\s+)?(?:about|cover|contain)\b|summ?ari[sz]e|\bsummary\b|\boverview\b|tl;?dr|main\s+(?:points?|ideas?|topics?|themes?|takeaways?)|key\s+(?:points?|takeaways?|ideas?|themes?)|the\s+gist|high[-\s]?level|what\s+kind\s+of\s+(?:document|book|text|doc|report)/i.test(
+    question,
+  );
+}
+
 export async function answerQuestion(
   question: string,
   hits: SearchHit[],
@@ -95,11 +105,21 @@ export async function answerQuestion(
     policy?: GroundingPolicy;
     verify?: boolean;
     candidateScores?: number[];
+    overview?: boolean;
   } = {},
 ): Promise<Answer> {
   const policy = opts.policy ?? DEFAULT_POLICY;
+  const overview = opts.overview ?? isOverviewQuestion(question);
 
-  if (!isGrounded(hits, opts.candidateScores ?? [], policy)) {
+  // For an overview question the grounding condition is simply that a corpus
+  // exists, since no single chunk will score high against "what is this about?".
+  // Factual questions still go through the full similarity gate. Either way the
+  // faithfulness check downstream flags anything the excerpts do not support.
+  const groundedOk = overview
+    ? hits.length >= policy.minHits
+    : isGrounded(hits, opts.candidateScores ?? [], policy);
+
+  if (!groundedOk) {
     return {
       grounded: false,
       text: REFUSAL,
@@ -113,11 +133,14 @@ export async function answerQuestion(
     .map((h, i) => `[${i + 1}] (${h.chunk.source ?? h.chunk.id})\n${h.chunk.text}`)
     .join("\n\n");
 
+  const system = overview
+    ? "You are given numbered excerpts from a single document. Give a brief, faithful overview of what the document is about, using ONLY these excerpts. Cite the excerpts you draw on as [1], [2], and so on. Do not use outside knowledge. If the excerpts are too fragmentary to tell, say that plainly."
+    : "You answer ONLY from the provided context. Cite sources inline as [1], [2], and so on, matching the numbered context blocks you used. If the context does not contain the answer, say you do not know. Never use outside knowledge or guess.";
+
   const { result: gen, ms: generateMs } = await timed(() =>
     generateText({
       model: getChatModel(opts.provider),
-      system:
-        "You answer ONLY from the provided context. Cite sources inline as [1], [2]… matching the numbered context blocks you used. If the context does not contain the answer, say you do not know — never use outside knowledge or guess.",
+      system,
       prompt: `Context:\n${context}\n\nQuestion: ${question}\n\nGrounded, cited answer:`,
     }),
   );

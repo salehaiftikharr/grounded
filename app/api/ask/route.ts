@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { loadIndex } from "@/src/lib/loadIndex";
 import { retrieve, retrieveFromSession } from "@/src/lib/retrieve";
-import { answerQuestion } from "@/src/lib/answer";
+import { answerQuestion, isOverviewQuestion } from "@/src/lib/answer";
 import { timed } from "@/src/lib/observe";
 import { readSessionId } from "@/src/lib/session";
 import { sessionChunkCount } from "@/src/lib/db";
@@ -70,10 +70,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
   }
 
+  // Overview questions need a broader slice of the corpus to summarize from, and
+  // they skip the similarity gate inside answerQuestion.
+  const overview = isOverviewQuestion(question);
+  const k = overview ? 8 : 4;
   const { result: retrieved, ms: retrieveMs } = await timed(() =>
     usingUpload
-      ? retrieveFromSession(sessionId as string, question, { k: 4 })
-      : retrieve(store!, question, { k: 4 }),
+      ? retrieveFromSession(sessionId as string, question, { k })
+      : retrieve(store!, question, { k }),
   );
   const { hits, candidateScores } = retrieved;
   const retrieval = hits.map((h) => ({
@@ -86,7 +90,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // verify: true runs the output-side faithfulness check after generation;
   // candidateScores feed the relative grounding gate.
-  const result = await answerQuestion(question, hits, { verify: true, candidateScores });
+  const result = await answerQuestion(question, hits, { verify: true, candidateScores, overview });
 
   const f = result.faithfulness;
 

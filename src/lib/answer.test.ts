@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGrounded, DEFAULT_POLICY, type GroundingPolicy } from "./answer";
+import { isGrounded, isOverviewQuestion, DEFAULT_POLICY, type GroundingPolicy } from "./answer";
 import type { SearchHit } from "./store";
 
 const hit = (score: number): SearchHit => ({
@@ -45,4 +45,31 @@ test("with too few candidates to form a distribution, the floor governs", () => 
 test("a stricter policy raises the bar", () => {
   const strict: GroundingPolicy = { minTopScore: 0.7, minHits: 1, minMargin: 1.0 };
   assert.equal(isGrounded([hit(0.6)], STANDS_OUT, strict), false);
+});
+
+test("isOverviewQuestion recognizes summary and overview questions", () => {
+  for (const q of [
+    "what is this about?",
+    "What's this document about",
+    "what is it about?",
+    "summarize this",
+    "give me an overview",
+    "tldr?",
+    "what are the main points",
+    "key takeaways?",
+    "what kind of document is this",
+  ]) {
+    assert.equal(isOverviewQuestion(q), true, `should be overview: ${q}`);
+  }
+});
+
+test("isOverviewQuestion leaves specific factual questions to the gate", () => {
+  for (const q of [
+    "what is the capital of France?",
+    "who handles social media?",
+    "how does the faithfulness check work?",
+    "what does the handbook say about refunds?",
+  ]) {
+    assert.equal(isOverviewQuestion(q), false, `should not be overview: ${q}`);
+  }
 });
