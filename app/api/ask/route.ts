@@ -8,11 +8,15 @@ import { sessionChunkCount } from "@/src/lib/db";
 
 // Needs node:fs to read the committed index.
 export const runtime = "nodejs";
+// Retrieval, generation, and the faithfulness pass are three model calls in
+// sequence, so the request can run close to ten seconds. Give it headroom well
+// past the default so a slow model call never turns into a gateway timeout.
+export const maxDuration = 60;
 
 // Naive per-instance IP rate limit — enough to cap demo spend. A production
 // deploy would back this with Upstash/Vercel KV for a shared, durable counter.
 const buckets = new Map<string, { count: number; reset: number }>();
-const LIMIT = 8;
+const LIMIT = 30;
 const WINDOW_MS = 60 * 60 * 1000;
 
 function rateLimited(ip: string): boolean {
@@ -39,7 +43,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   if (rateLimited(ip)) {
     return Response.json(
-      { error: "Hourly demo limit reached. Try again later." },
+      { error: "You have hit the hourly demo limit. Please try again in a bit." },
       { status: 429 },
     );
   }

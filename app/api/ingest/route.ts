@@ -7,6 +7,7 @@ import { readSessionId, newSessionId, sessionCookie } from "@/src/lib/session";
 
 // Needs node APIs (crypto, pdf parsing) and the Postgres client.
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 // Cost guards: embedding uploads spends real credits on a public URL, so cap
 // how much a single upload can cost and how often anyone can upload.

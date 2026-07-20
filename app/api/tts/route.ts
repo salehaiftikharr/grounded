@@ -18,6 +18,7 @@ const DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
 const MODEL_ID = "eleven_flash_v2_5";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
