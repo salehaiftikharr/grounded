@@ -1,5 +1,7 @@
 # Grounded 🔎
 
+[![CI](https://github.com/salehaiftikharr/grounded/actions/workflows/ci.yml/badge.svg)](https://github.com/salehaiftikharr/grounded/actions/workflows/ci.yml)
+
 A retrieval-augmented Q&A agent that **answers only from its corpus, cites its
 sources, and refuses when the answer is not grounded.** Ask it something the
 documents cover and it answers with citations; ask it something they do not and
