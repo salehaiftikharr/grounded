@@ -6,6 +6,19 @@
 // ask something the uploaded document does not cover and it still refuses.
 
 import { useEffect, useRef, useState } from "react";
+import {
+  Database,
+  Upload,
+  RotateCcw,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+} from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export interface CorpusState {
   type: "default" | "upload";
@@ -69,14 +82,14 @@ export function CorpusPanel({
       setNote(
         data.truncated
           ? `Indexed ${data.chunks} chunks (document was long, so it was truncated).`
-          : `Indexed ${data.chunks} chunks. Ask away — including something it does not cover.`,
+          : `Indexed ${data.chunks} chunks. Ask away, including something it does not cover.`,
       );
       setText("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       setOpen(false);
     } catch {
-      setError("Network error — please try again.");
+      setError("Network error, please try again.");
     } finally {
       setWorking(false);
     }
@@ -90,6 +103,7 @@ export function CorpusPanel({
     try {
       await fetch("/api/ingest", { method: "DELETE" });
       onCorpusChange({ type: "default", sources: [] });
+      setOpen(false);
     } catch {
       setError("Could not reset.");
     } finally {
@@ -98,64 +112,105 @@ export function CorpusPanel({
   }
 
   const usingUpload = corpus.type === "upload";
+  const docTabActive = open || usingUpload;
 
   return (
-    <div className="corpus">
-      <div className="corpus-bar">
-        <span className={`corpus-tag ${usingUpload ? "upload" : "default"}`}>
-          {usingUpload
-            ? `Answering from your document: ${corpus.sources.join(", ")}`
-            : "Answering from the built-in corpus (RAG concepts)"}
-        </span>
-        <div className="corpus-actions">
-          {usingUpload && (
-            <button type="button" className="corpus-link" onClick={reset} disabled={working || busy}>
-              Reset to default
-            </button>
-          )}
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <Database className="size-4" />
+          </span>
+          <div className="min-w-0 leading-tight">
+            <div className="text-xs text-muted-foreground">Answering from</div>
+            <div className="truncate text-sm font-medium">
+              {usingUpload ? corpus.sources.join(", ") : "Built-in corpus (RAG concepts)"}
+            </div>
+          </div>
+        </div>
+
+        <div className="inline-flex shrink-0 rounded-lg bg-muted p-[3px]">
           <button
             type="button"
-            className="corpus-link"
-            onClick={() => setOpen((v) => !v)}
-            disabled={busy}
+            disabled={busy || working}
+            onClick={() => (usingUpload ? void reset() : setOpen(false))}
+            className={cn(
+              "cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+              !docTabActive
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
           >
-            {open ? "Close" : usingUpload ? "Replace document" : "Use your own document"}
+            Built-in
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setOpen(true)}
+            className={cn(
+              "cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+              docTabActive
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Your document
           </button>
         </div>
       </div>
 
       {open && (
-        <div className="corpus-form">
-          <p className="corpus-hint">
+        <div className="space-y-3 border-t border-border p-4">
+          <p className="text-sm text-muted-foreground">
             Upload a PDF, TXT, or MD file, or paste text. It stays private to your session and
             clears after a day. Then try a question it covers, and one it does not, and watch it
             refuse.
           </p>
-          <label className="corpus-file">
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".pdf,.txt,.md,text/plain,text/markdown,application/pdf"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <div className="corpus-or">or paste text</div>
-          <textarea
+          <Input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.txt,.md,text/plain,text/markdown,application/pdf"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="cursor-pointer"
+          />
+          <div className="text-center text-xs text-muted-foreground">or paste text</div>
+          <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Paste text to answer from…"
             rows={4}
           />
-          <div className="corpus-submit">
-            <button type="button" onClick={submit} disabled={working}>
-              {working ? "Indexing…" : "Index this document"}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={submit} disabled={working}>
+              {working ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Indexing…
+                </>
+              ) : (
+                <>
+                  <Upload className="size-4" /> Index this document
+                </>
+              )}
+            </Button>
+            {usingUpload && (
+              <Button variant="ghost" onClick={reset} disabled={working}>
+                <RotateCcw className="size-4" /> Reset to built-in
+              </Button>
+            )}
           </div>
-          {error && <p className="corpus-error">⚠ {error}</p>}
+          {error && (
+            <p className="flex items-center gap-1.5 text-sm text-rose-400">
+              <AlertCircle className="size-4" /> {error}
+            </p>
+          )}
         </div>
       )}
 
-      {note && !open && <p className="corpus-note">{note}</p>}
-    </div>
+      {note && !open && (
+        <div className="flex items-center gap-1.5 border-t border-border px-4 py-2 text-sm text-emerald-400">
+          <CheckCircle2 className="size-4" /> {note}
+        </div>
+      )}
+    </Card>
   );
 }

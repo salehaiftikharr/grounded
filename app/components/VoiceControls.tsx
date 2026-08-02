@@ -1,14 +1,13 @@
 "use client";
 
-// Grounded voice layer: drop-in UI controls, styled to match Grounded.
+// Grounded voice layer: drop-in UI controls built on the shadcn Button.
 //
 //   <MicButton onQuestion={...} />  next to the question input
 //   <SpeakAnswer text={answer} />   next to a rendered answer or refusal
-//
-// Styling comes from the `.voice-*` classes in globals.css so these stay
-// consistent with the rest of the dark UI.
 
 import { useEffect, useState } from "react";
+import { Mic, Square, Volume2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useVoice } from "../lib/useVoice";
 
 // Voice features depend on browser-only APIs (SpeechRecognition, Audio), so
@@ -35,19 +34,25 @@ export function MicButton({
   if (!sttSupported) return null; // Hide gracefully where the browser cannot listen.
 
   return (
-    <>
-      <button
-        type="button"
-        disabled={disabled}
-        aria-pressed={isListening}
-        aria-label={isListening ? "Stop listening" : "Ask by voice"}
-        className={`voice-btn mic ${isListening ? "listening" : ""}`}
-        onClick={() => (isListening ? stopListening() : startListening(onQuestion))}
-      >
-        {isListening ? "● Listening…" : "🎤 Voice"}
-      </button>
-      {error && <span className="voice-error">{error}</span>}
-    </>
+    <Button
+      type="button"
+      variant={isListening ? "default" : "secondary"}
+      disabled={disabled}
+      aria-pressed={isListening}
+      aria-label={isListening ? "Stop listening" : "Ask by voice"}
+      title={error || undefined}
+      onClick={() => (isListening ? stopListening() : startListening(onQuestion))}
+    >
+      {isListening ? (
+        <>
+          <Square className="size-3 fill-current" /> Listening
+        </>
+      ) : (
+        <>
+          <Mic className="size-4" /> Voice
+        </>
+      )}
+    </Button>
   );
 }
 
@@ -58,16 +63,24 @@ export function SpeakAnswer({ text }: { text: string }) {
   if (!text?.trim()) return null;
 
   return (
-    <span className="voice-speak">
-      <button
-        type="button"
-        aria-label={isSpeaking ? "Stop" : "Hear this answer"}
-        className={`voice-btn speak ${isSpeaking ? "speaking" : ""}`}
-        onClick={() => (isSpeaking ? stopSpeaking() : speak(text))}
-      >
-        {isSpeaking ? "◼ Stop" : "🔊 Hear this"}
-      </button>
-      {error && <span className="voice-error">{error}</span>}
-    </span>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="text-muted-foreground"
+      aria-label={isSpeaking ? "Stop" : "Hear this answer"}
+      title={error || undefined}
+      onClick={() => (isSpeaking ? stopSpeaking() : speak(text))}
+    >
+      {isSpeaking ? (
+        <>
+          <Square className="size-3 fill-current" /> Stop
+        </>
+      ) : (
+        <>
+          <Volume2 className="size-4" /> Hear this
+        </>
+      )}
+    </Button>
   );
 }
