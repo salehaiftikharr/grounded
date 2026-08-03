@@ -84,6 +84,20 @@ export function isGrounded(
   return z >= policy.minMargin;
 }
 
+/**
+ * How far the top hit stands out from this query's candidate distribution, in
+ * standard deviations (a z-score). This is the number that actually explains a
+ * grounding decision: a real match sits well above the pile, a near-miss sits in
+ * it. Returns null when there are too few candidates to form a distribution.
+ */
+export function topMargin(topScore: number, candidateScores: number[]): number | null {
+  if (candidateScores.length < 4) return null;
+  const mu = mean(candidateScores);
+  const sd = stdev(candidateScores, mu);
+  if (sd === 0) return null;
+  return (topScore - mu) / sd;
+}
+
 const REFUSAL =
   "I don't have enough grounded information in the corpus to answer that confidently.";
 

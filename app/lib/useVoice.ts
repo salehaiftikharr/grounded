@@ -5,8 +5,8 @@
 //   stopListening()     SpeechRecognition, calling back with the transcript
 //
 // Voice input uses the browser Web Speech API to keep the first pass simple
-// and dependency-free. Later we can route input through ElevenLabs Scribe
-// (speech-to-text) so the whole loop runs on their stack; see INTEGRATION.md.
+// and dependency-free. Later we could route input through ElevenLabs Scribe
+// (speech-to-text) so the whole loop runs on their stack.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 

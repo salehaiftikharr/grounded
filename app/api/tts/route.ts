@@ -3,9 +3,6 @@
 // The API key stays on the server (never shipped to the browser). The client
 // POSTs { text } here, we call ElevenLabs, and stream the audio back.
 //
-// Assumes Next.js App Router (app/ directory). If Grounded uses the Pages
-// Router, see INTEGRATION.md for the pages/api/tts.ts variant.
-
 import { NextRequest } from "next/server";
 
 // Default voice: "Sarah", one of ElevenLabs' current default voices, which
@@ -20,7 +17,29 @@ const MODEL_ID = "eleven_flash_v2_5";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// This is a public endpoint that spends real ElevenLabs credits, so cap how often
+// any one IP can call it. Per-instance and best-effort (a production deploy would
+// use a shared store), but enough to blunt a trivial credit-drain loop.
+const TTS_LIMIT = 20;
+const WINDOW_MS = 60 * 60 * 1000;
+const buckets = new Map<string, { count: number; reset: number }>();
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const b = buckets.get(ip);
+  if (!b || now > b.reset) {
+    buckets.set(ip, { count: 1, reset: now + WINDOW_MS });
+    return false;
+  }
+  b.count += 1;
+  return b.count > TTS_LIMIT;
+}
+
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  if (rateLimited(ip)) {
+    return Response.json({ error: "Voice limit reached. Try again later." }, { status: 429 });
+  }
+
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
     return Response.json(
@@ -49,9 +68,9 @@ export async function POST(req: NextRequest) {
 
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
 
-  const elevenRes = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
+  let elevenRes: Response;
+  try {
+    elevenRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",
       headers: {
         "xi-api-key": apiKey,
@@ -66,8 +85,10 @@ export async function POST(req: NextRequest) {
           similarity_boost: 0.75,
         },
       }),
-    }
-  );
+    });
+  } catch {
+    return Response.json({ error: "Could not reach the speech service." }, { status: 502 });
+  }
 
   if (!elevenRes.ok || !elevenRes.body) {
     const detail = await elevenRes.text().catch(() => "");

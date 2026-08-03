@@ -150,18 +150,17 @@ export async function verifyFaithfulness(
     prompt: `CONTEXT:\n${context}\n\nANSWER:\n${answer}\n\nJudge each claim in the answer against the context.`,
   });
 
-  // Overlapping chunks mean a supporting span can straddle a chunk boundary —
-  // present in the retrieved set but not contiguous within any single chunk. So
-  // if no single chunk contains the quote, fall back to the joined retrieved text
-  // before dropping the claim. (sourceIndex stays null when only the join matches,
-  // since there is no single chunk to point the highlight at.)
-  const joined = chunkTexts.join("\n\n");
+  // A claim counts as located ONLY when its quote is a substring of a SINGLE
+  // retrieved chunk. An earlier version also matched against all chunks joined
+  // together, but that manufactured adjacencies that exist in no source: a quote
+  // whose halves come from two unrelated chunks would be certified as real
+  // evidence. We would rather under-credit a genuine cross-chunk quote than
+  // certify a fabricated one, since the whole point of this gate is to not
+  // overclaim support.
   const claims: ClaimCheck[] = object.claims.map((c) => {
     if (!c.supported) return { ...c, evidenceLocated: false, sourceIndex: null };
     const sourceIndex = locateEvidence(c.evidence, chunkTexts);
-    if (sourceIndex !== null) return { ...c, evidenceLocated: true, sourceIndex };
-    const acrossSet = locateEvidence(c.evidence, [joined]) !== null;
-    return { ...c, evidenceLocated: acrossSet, sourceIndex: null };
+    return { ...c, evidenceLocated: sourceIndex !== null, sourceIndex };
   });
   const { verdict, score, unsupported } = summarize(claims);
   return { verdict, score, claims, unsupported, usage: normalizeUsage(usage) };

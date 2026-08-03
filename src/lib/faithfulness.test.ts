@@ -57,6 +57,13 @@ test("locateEvidence rejects too-short quotes as not real evidence", () => {
   assert.equal(locateEvidence("the", ["the grounding gate"]), null);
 });
 
+test("locateEvidence does not match a quote that only exists across two chunks", () => {
+  // The whole point of dropping the joined-set fallback: a span whose halves live
+  // in two unrelated chunks is not real evidence, so it must not be located.
+  const chunks = ["the grounding gate runs before generation", "the faithfulness check runs after"];
+  assert.equal(locateEvidence("before generation the faithfulness check", chunks), null);
+});
+
 test("normalizeForMatch lowercases, strips punctuation, and collapses whitespace", () => {
   assert.equal(normalizeForMatch("  The  Gate, runs!  "), "the gate runs");
 });

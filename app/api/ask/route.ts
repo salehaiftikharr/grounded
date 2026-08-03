@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { loadIndex } from "@/src/lib/loadIndex";
 import { retrieve, retrieveFromSession } from "@/src/lib/retrieve";
-import { answerQuestion, isOverviewQuestion } from "@/src/lib/answer";
+import { answerQuestion, isOverviewQuestion, topMargin } from "@/src/lib/answer";
 import { timed } from "@/src/lib/observe";
 import { readSessionId } from "@/src/lib/session";
 import { sessionChunkCount } from "@/src/lib/db";
@@ -59,65 +59,84 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   const usingUpload = uploadedCount > 0;
 
-  let store: ReturnType<typeof loadIndex> | null = null;
-  if (!usingUpload) {
-    store = loadIndex();
-    if (!store.size) {
-      return Response.json(
-        { error: "The index has not been built. Run `npm run precompute`." },
-        { status: 503 },
-      );
+  // Everything downstream reaches a model or a data source, so wrap it: a transient
+  // 529 overload, an embedding timeout, a cold database, or a corrupt index should
+  // return a clean JSON error the UI can show, not a raw 500. Failing gracefully is
+  // the whole thesis of this project.
+  try {
+    let store: ReturnType<typeof loadIndex> | null = null;
+    if (!usingUpload) {
+      store = loadIndex();
+      if (!store.size) {
+        return Response.json(
+          { error: "The index has not been built. Run `npm run precompute`." },
+          { status: 503 },
+        );
+      }
     }
+
+    // Overview questions need a broader slice of the corpus to summarize from, and
+    // they skip the similarity gate inside answerQuestion.
+    const overview = isOverviewQuestion(question);
+    const k = overview ? 8 : 4;
+    const { result: retrieved, ms: retrieveMs } = await timed(() =>
+      usingUpload
+        ? retrieveFromSession(sessionId as string, question, { k })
+        : retrieve(store!, question, { k }),
+    );
+    const { hits, candidateScores } = retrieved;
+    const retrieval = hits.map((h) => ({
+      source: h.chunk.source ?? h.chunk.id,
+      score: Number(h.score.toFixed(3)),
+      // Full (normalized) chunk text, capped — the UI highlights the supporting
+      // span inside it, so it needs more than a 240-char teaser.
+      snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 600),
+    }));
+
+    // verify: true runs the output-side faithfulness check after generation;
+    // candidateScores feed the relative grounding gate.
+    const result = await answerQuestion(question, hits, { verify: true, candidateScores, overview });
+
+    const f = result.faithfulness;
+
+    return Response.json({
+      grounded: result.grounded,
+      corpus: usingUpload ? "upload" : "default",
+      topScore: retrieval[0]?.score ?? 0,
+      // How far the top hit stands out from the candidate pile (a z-score) — the
+      // number that actually explains the gate decision. Null for overview
+      // questions (which bypass the relative gate) or too few candidates.
+      margin: overview ? null : topMargin(hits[0]?.score ?? 0, candidateScores),
+      answer: result.text,
+      citations: result.citations.map((c) => ({
+        source: c.source ?? c.id,
+        score: Number(c.score.toFixed(3)),
+      })),
+      retrieval,
+      faithfulness: f
+        ? {
+            verdict: f.verdict,
+            score: Number(f.score.toFixed(2)),
+            claims: f.claims,
+            unsupported: f.unsupported,
+          }
+        : null,
+      timings: {
+        retrieveMs,
+        generateMs: result.timings.generateMs,
+        verifyMs: result.timings.verifyMs,
+        totalMs: retrieveMs + result.timings.generateMs + result.timings.verifyMs,
+      },
+      usage: result.usage,
+    });
+  } catch (err) {
+    console.error("ask failed:", err);
+    return Response.json(
+      {
+        error:
+          "Something went wrong reaching the model or a data source. This is usually temporary, so please try again.",
+      },
+      { status: 502 },
+    );
   }
-
-  // Overview questions need a broader slice of the corpus to summarize from, and
-  // they skip the similarity gate inside answerQuestion.
-  const overview = isOverviewQuestion(question);
-  const k = overview ? 8 : 4;
-  const { result: retrieved, ms: retrieveMs } = await timed(() =>
-    usingUpload
-      ? retrieveFromSession(sessionId as string, question, { k })
-      : retrieve(store!, question, { k }),
-  );
-  const { hits, candidateScores } = retrieved;
-  const retrieval = hits.map((h) => ({
-    source: h.chunk.source ?? h.chunk.id,
-    score: Number(h.score.toFixed(3)),
-    // Full (normalized) chunk text, capped — the UI highlights the supporting
-    // span inside it, so it needs more than a 240-char teaser.
-    snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 600),
-  }));
-
-  // verify: true runs the output-side faithfulness check after generation;
-  // candidateScores feed the relative grounding gate.
-  const result = await answerQuestion(question, hits, { verify: true, candidateScores, overview });
-
-  const f = result.faithfulness;
-
-  return Response.json({
-    grounded: result.grounded,
-    corpus: usingUpload ? "upload" : "default",
-    topScore: retrieval[0]?.score ?? 0,
-    answer: result.text,
-    citations: result.citations.map((c) => ({
-      source: c.source ?? c.id,
-      score: Number(c.score.toFixed(3)),
-    })),
-    retrieval,
-    faithfulness: f
-      ? {
-          verdict: f.verdict,
-          score: Number(f.score.toFixed(2)),
-          claims: f.claims,
-          unsupported: f.unsupported,
-        }
-      : null,
-    timings: {
-      retrieveMs,
-      generateMs: result.timings.generateMs,
-      verifyMs: result.timings.verifyMs,
-      totalMs: retrieveMs + result.timings.generateMs + result.timings.verifyMs,
-    },
-    usage: result.usage,
-  });
 }

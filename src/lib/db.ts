@@ -1,4 +1,4 @@
-import { sql } from "@vercel/postgres";
+import { sql, db } from "@vercel/postgres";
 import type { SearchHit, StoredChunk } from "./store";
 
 /**
@@ -56,19 +56,38 @@ export interface IngestChunk {
 /** Replace this session's corpus with the given chunks (upload is authoritative). */
 export async function replaceSessionChunks(sessionId: string, chunks: IngestChunk[]): Promise<void> {
   await ensureSchema();
-  await sql`DELETE FROM uploaded_chunks WHERE session_id = ${sessionId}`;
-  for (const c of chunks) {
-    await sql`
-      INSERT INTO uploaded_chunks (id, session_id, doc_id, source, text, embedding)
-      VALUES (
-        ${c.id},
-        ${sessionId},
-        ${c.docId},
-        ${c.source ?? null},
-        ${c.text},
-        ${toVectorLiteral(c.embedding)}::vector
-      )
-    `;
+  // Atomic swap: delete the old corpus and insert the new one in ONE transaction,
+  // with the inserts batched into a single statement. If anything fails partway
+  // (a dropped connection, a timeout, a concurrent re-upload), the whole thing
+  // rolls back instead of leaving the session with a half-loaded corpus.
+  const client = await db.connect();
+  try {
+    await client.sql`BEGIN`;
+    await client.sql`DELETE FROM uploaded_chunks WHERE session_id = ${sessionId}`;
+    if (chunks.length > 0) {
+      const cols = 6;
+      const rows: string[] = [];
+      const params: unknown[] = [];
+      chunks.forEach((c, i) => {
+        const b = i * cols;
+        rows.push(`($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}::vector)`);
+        params.push(c.id, sessionId, c.docId, c.source ?? null, c.text, toVectorLiteral(c.embedding));
+      });
+      await client.query(
+        `INSERT INTO uploaded_chunks (id, session_id, doc_id, source, text, embedding)
+         VALUES ${rows.join(", ")}
+         ON CONFLICT (id) DO UPDATE
+           SET doc_id = EXCLUDED.doc_id, source = EXCLUDED.source,
+               text = EXCLUDED.text, embedding = EXCLUDED.embedding`,
+        params,
+      );
+    }
+    await client.sql`COMMIT`;
+  } catch (e) {
+    await client.sql`ROLLBACK`.catch(() => {});
+    throw e;
+  } finally {
+    client.release();
   }
 }
 

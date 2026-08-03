@@ -120,10 +120,11 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   try {
     await replaceSessionChunks(sessionId, ingestChunks);
-    await cleanupExpired();
   } catch {
     return json({ error: "Could not save the document. Is the database configured?" }, { status: 503 });
   }
+  // TTL cleanup is opportunistic and must never fail a save that already succeeded.
+  await cleanupExpired().catch(() => {});
 
   const sources = await sessionSources(sessionId).catch(() => [source]);
   const res = json({

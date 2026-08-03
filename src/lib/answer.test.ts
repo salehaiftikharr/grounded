@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGrounded, isOverviewQuestion, DEFAULT_POLICY, type GroundingPolicy } from "./answer";
+import { isGrounded, isOverviewQuestion, topMargin, DEFAULT_POLICY, type GroundingPolicy } from "./answer";
 import type { SearchHit } from "./store";
 
 const hit = (score: number): SearchHit => ({
@@ -61,6 +61,18 @@ test("isOverviewQuestion recognizes summary and overview questions", () => {
   ]) {
     assert.equal(isOverviewQuestion(q), true, `should be overview: ${q}`);
   }
+});
+
+test("topMargin is null with too few candidates or zero spread", () => {
+  assert.equal(topMargin(0.6, [0.6, 0.5, 0.4]), null); // fewer than 4 candidates
+  assert.equal(topMargin(0.5, [0.5, 0.5, 0.5, 0.5]), null); // no spread to measure against
+});
+
+test("topMargin measures how far the top sits above the candidate mean, in stdevs", () => {
+  const standsOut = topMargin(0.6, STANDS_OUT);
+  assert.ok(standsOut !== null && standsOut > 1.5); // top clearly rises above the pile
+  const flat = topMargin(0.62, FLAT);
+  assert.ok(flat !== null && flat < 1); // top barely rises above a high, flat pile
 });
 
 test("isOverviewQuestion leaves specific factual questions to the gate", () => {
