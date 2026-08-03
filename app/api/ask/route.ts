@@ -96,7 +96,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       try {
         const overview = isOverviewQuestion(question);
-        const k = overview ? 8 : 4;
+        // Uploaded answers retrieve a little wider so a synthesized answer has
+        // enough surrounding context; overview questions widest of all.
+        const k = overview ? 8 : usingUpload ? 6 : 4;
 
         const tRetrieve = Date.now();
         const { hits, candidateScores } = usingUpload

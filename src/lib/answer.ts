@@ -114,8 +114,8 @@ export const REFUSAL =
  *  batch (answerQuestion) and streaming answer paths so the two never drift. */
 export function answerSystemPrompt(overview: boolean): string {
   return overview
-    ? "You are given numbered excerpts from a single document. Give a brief, faithful overview of what the document is about, using ONLY these excerpts. Cite the excerpts you draw on as [1], [2], and so on. Do not use outside knowledge. If the excerpts are too fragmentary to tell, say that plainly."
-    : "You answer ONLY from the provided context. Cite sources inline as [1], [2], and so on, matching the numbered context blocks you used. If the context does not contain the answer, say you do not know. Never use outside knowledge or guess.";
+    ? "You are given numbered excerpts from a single document. Give a clear, confident overview of what the document is about, synthesizing across ONLY these excerpts. Cite the excerpts you draw on as [1], [2], and so on. Answer directly; do not narrate what the excerpts do or do not contain. Do not use outside knowledge. Only if the excerpts are genuinely too fragmentary to tell, say so plainly."
+    : "You answer questions using ONLY the provided context, and you answer them directly and completely. Synthesize across the numbered context blocks and give the best supported answer they allow, citing the blocks you use inline as [1], [2], and so on. Answer in a confident, natural voice, but stay close to what the context actually says: do not add superlatives, characterizations, or framing that the context does not contain, since every sentence you write is checked back against the sources. Do NOT preface your answer with meta-commentary such as 'based on the provided context' or 'the context does not give a full definition'; just state what the context establishes. Only if the context does not address the question at all should you say you do not know. Never use outside knowledge or invent details the context does not support.";
 }
 
 /** Build the numbered context block the answerer is prompted with. */

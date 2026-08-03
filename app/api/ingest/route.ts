@@ -92,11 +92,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     text = text.slice(0, MAX_CHARS);
   }
 
-  // Uploads are chunked finer than the built-in corpus so an individual fact in
-  // a short or dense document is its own retrievable unit, rather than being
-  // diluted inside one large block that a specific question matches only weakly.
+  // Chunk size adapts to document length. A short document is split fine so an
+  // individual fact is its own retrievable unit instead of being diluted inside
+  // one big block; a real multi-page document uses larger, coherent chunks so a
+  // broad or definitional question ("what is X?") retrieves enough surrounding
+  // prose to answer well rather than scattered fragments.
   const doc: RawDoc = { id: source, source, text };
-  let chunks = chunkText(doc, { size: 260, overlap: 50 });
+  const chunkSize = text.length < 1500 ? 220 : 520;
+  let chunks = chunkText(doc, { size: chunkSize, overlap: Math.round(chunkSize * 0.2) });
   if (!chunks.length) {
     return json({ error: "That document did not produce any usable text." }, { status: 400 });
   }
