@@ -4,6 +4,7 @@ import { loadIndex } from "@/src/lib/loadIndex";
 import { retrieve, retrieveFromSession } from "@/src/lib/retrieve";
 import {
   REFUSAL,
+  UPLOAD_POLICY,
   answerSystemPrompt,
   answerPrompt,
   buildContext,
@@ -113,7 +114,13 @@ export async function POST(req: NextRequest): Promise<Response> {
           score: Number(h.score.toFixed(3)),
         }));
 
-        const grounded = isAnswerable(hits, candidateScores, overview);
+        // Uploaded corpora use a more permissive, single-topic-aware policy.
+        const grounded = isAnswerable(
+          hits,
+          candidateScores,
+          overview,
+          usingUpload ? UPLOAD_POLICY : undefined,
+        );
 
         // The gate decision and sources go out first, before any generation.
         send({

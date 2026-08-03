@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isGrounded, isOverviewQuestion, topMargin, DEFAULT_POLICY, type GroundingPolicy } from "./answer";
+import {
+  isGrounded,
+  isOverviewQuestion,
+  topMargin,
+  DEFAULT_POLICY,
+  UPLOAD_POLICY,
+  type GroundingPolicy,
+} from "./answer";
 import type { SearchHit } from "./store";
 
 const hit = (score: number): SearchHit => ({
@@ -31,6 +38,18 @@ test("relative margin refuses a top hit that does not stand out from a high, fla
   // 0.62 clears the absolute floor, but it is just the tallest of a uniform pile,
   // so the relative test (z-score) refuses it — the case a fixed floor misses.
   assert.equal(isGrounded([hit(0.62)], FLAT), false);
+});
+
+test("upload policy answers a single-topic flat pile that the default gate refuses", () => {
+  // A bring-your-own-document upload is one topic, so its chunks bunch together
+  // and the default margin gate refuses even a real match. The upload policy
+  // drops the margin test and leans on a lower floor, so the same hit answers.
+  assert.equal(isGrounded([hit(0.62)], FLAT, DEFAULT_POLICY), false);
+  assert.equal(isGrounded([hit(0.62)], FLAT, UPLOAD_POLICY), true);
+});
+
+test("upload policy still refuses a genuinely off-topic query below its floor", () => {
+  assert.equal(isGrounded([hit(0.15)], FLAT, UPLOAD_POLICY), false);
 });
 
 test("minMargin = 0 disables the relative test, falling back to the floor only", () => {

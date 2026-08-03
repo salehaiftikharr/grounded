@@ -53,11 +53,14 @@ export function chunkText(doc: RawDoc, opts: ChunkOptions = {}): Chunk[] {
 
   for (const paragraph of paragraphs) {
     if (paragraph.length > size) {
-      // Oversized paragraph: emit what we have, then hard-split it.
+      // Oversized paragraph: emit what we have, then split it on sentence
+      // boundaries so each fact stays intact and retrievable, rather than
+      // cutting mid-sentence. A single sentence longer than the window is the
+      // only case that still gets a hard character split.
       flush();
       buf = "";
-      for (let i = 0; i < paragraph.length; i += size - overlap) {
-        buf = paragraph.slice(i, i + size);
+      for (const piece of splitOnSentences(paragraph, size, overlap)) {
+        buf = piece;
         flush();
       }
       buf = "";
@@ -69,4 +72,40 @@ export function chunkText(doc: RawDoc, opts: ChunkOptions = {}): Chunk[] {
   flush();
 
   return chunks;
+}
+
+/** Break a run of text into sentences, keeping the terminal punctuation. */
+function splitSentences(text: string): string[] {
+  const parts = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g);
+  return parts ? parts.map((s) => s.trim()).filter(Boolean) : [text];
+}
+
+/**
+ * Pack a long paragraph into <=size windows on sentence boundaries, carrying an
+ * `overlap` tail between windows. A lone sentence longer than the window is hard
+ * character-split as a last resort.
+ */
+function splitOnSentences(paragraph: string, size: number, overlap: number): string[] {
+  const out: string[] = [];
+  let cur = "";
+  const push = () => {
+    const t = cur.trim();
+    if (t) out.push(t);
+    cur = overlap > 0 && t ? t.slice(-overlap) : "";
+  };
+  for (const sentence of splitSentences(paragraph)) {
+    if (sentence.length > size) {
+      push();
+      cur = "";
+      for (let i = 0; i < sentence.length; i += Math.max(1, size - overlap)) {
+        out.push(sentence.slice(i, i + size));
+      }
+      continue;
+    }
+    if (cur && cur.length + sentence.length + 1 > size) push();
+    cur += (cur ? " " : "") + sentence;
+  }
+  const tail = cur.trim();
+  if (tail) out.push(tail);
+  return out;
 }

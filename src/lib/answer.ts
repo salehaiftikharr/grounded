@@ -34,6 +34,15 @@ export interface GroundingPolicy {
 // "is the top score big?" but "does the top hit actually stand out from the rest?"
 export const DEFAULT_POLICY: GroundingPolicy = { minTopScore: 0.4, minHits: 1, minMargin: 1.0 };
 
+// An uploaded document is a single-topic corpus: every chunk is about the same
+// thing, so the relative-margin test — which asks "does the top hit stand out
+// from an unrelated pile?" — has no unrelated pile to work with and wrongly
+// refuses genuinely answerable questions. For uploads we therefore drop the
+// margin test and lean on a lower absolute floor, tuned so a casually-phrased
+// question about the document still clears it while a truly off-topic question
+// (which lands far lower) does not. The faithfulness check remains the backstop.
+export const UPLOAD_POLICY: GroundingPolicy = { minTopScore: 0.22, minHits: 1, minMargin: 0 };
+
 function mean(xs: number[]): number {
   return xs.reduce((a, b) => a + b, 0) / xs.length;
 }

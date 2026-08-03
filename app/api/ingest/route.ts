@@ -92,8 +92,11 @@ export async function POST(req: NextRequest): Promise<Response> {
     text = text.slice(0, MAX_CHARS);
   }
 
+  // Uploads are chunked finer than the built-in corpus so an individual fact in
+  // a short or dense document is its own retrievable unit, rather than being
+  // diluted inside one large block that a specific question matches only weakly.
   const doc: RawDoc = { id: source, source, text };
-  let chunks = chunkText(doc);
+  let chunks = chunkText(doc, { size: 260, overlap: 50 });
   if (!chunks.length) {
     return json({ error: "That document did not produce any usable text." }, { status: 400 });
   }
