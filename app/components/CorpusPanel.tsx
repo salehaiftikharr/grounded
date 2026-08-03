@@ -13,16 +13,20 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
+  FileText,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { SAMPLES, type Sample } from "../lib/samples";
 
 export interface CorpusState {
   type: "default" | "upload";
   sources: string[];
+  /** Tailored example questions to show for this corpus (used by samples). */
+  examples?: string[];
 }
 
 export function CorpusPanel({
@@ -111,6 +115,36 @@ export function CorpusPanel({
     }
   }
 
+  // Load a built-in use-case document in one click, and surface its tailored
+  // questions so the visitor can see grounding, citation, and refusal at work
+  // on a document no public model was trained on.
+  async function loadSample(sample: Sample) {
+    if (working) return;
+    setError("");
+    setNote("");
+    setWorking(true);
+    try {
+      const form = new FormData();
+      form.set("text", sample.text);
+      form.set("source", sample.title);
+      const res = await fetch("/api/ingest", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Could not load the sample.");
+        return;
+      }
+      onCorpusChange({ type: "upload", sources: [sample.title], examples: sample.questions });
+      setNote(
+        "Loaded a sample. Try the questions below — the last one is not covered by the document, so watch it refuse instead of guessing.",
+      );
+      setOpen(false);
+    } catch {
+      setError("Network error, please try again.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   const usingUpload = corpus.type === "upload";
   const docTabActive = open || usingUpload;
 
@@ -158,6 +192,29 @@ export function CorpusPanel({
           </button>
         </div>
       </div>
+
+      {!usingUpload && !open && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <FileText className="size-3.5 text-primary" /> Try a sample document
+          </span>
+          {SAMPLES.map((s) => (
+            <Button
+              key={s.id}
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy || working}
+              title={s.blurb}
+              onClick={() => void loadSample(s)}
+              className="rounded-full font-normal"
+            >
+              {s.label}
+            </Button>
+          ))}
+          {working && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+        </div>
+      )}
 
       {open && (
         <div className="space-y-3 border-t border-border p-4">

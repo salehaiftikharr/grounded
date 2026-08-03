@@ -76,7 +76,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       source = file.name;
     } else if (typeof pasted === "string" && pasted.trim()) {
       text = pasted;
-      source = "pasted text";
+      // An optional source label lets a named sample cite itself properly.
+      const label = form.get("source");
+      source = typeof label === "string" && label.trim() ? label.trim() : "pasted text";
     } else {
       return json({ error: "Upload a .pdf, .txt, or .md file, or paste some text." }, { status: 400 });
     }

@@ -14,6 +14,7 @@ import {
   AlertCircle,
   ExternalLink,
   TrendingUp,
+  Database,
 } from "lucide-react";
 import { MicButton, SpeakAnswer } from "./components/VoiceControls";
 import { CorpusPanel, type CorpusState } from "./components/CorpusPanel";
@@ -97,11 +98,20 @@ const BAD = "border-rose-600/20 bg-rose-50 text-rose-700";
 function faithClass(f: Faithfulness): string {
   return f.verdict === "supported" ? OK : f.verdict === "partial" ? WARN : BAD;
 }
+
+// A grounded answer that is itself a refusal — the document was on-topic enough
+// to retrieve, but does not actually contain the answer, so the model declined.
+function isRefusalAnswer(text: string): boolean {
+  return /^\s*(the document does not|i don'?t know|i do not know|(?:the )?(?:provided )?(?:context|document) does not (?:cover|address|mention|contain|specify|provide|state|include|discuss))/i.test(
+    text,
+  );
+}
 function faithText(f: Faithfulness): string {
+  const n = f.claims.length;
   return f.verdict === "supported"
-    ? `Faithful to sources · all ${f.claims.length} claims supported`
+    ? `Faithful to sources · ${n === 1 ? "the claim is" : `all ${n} claims`} supported`
     : f.verdict === "partial"
-      ? `${f.unsupported.length} of ${f.claims.length} claims unsupported`
+      ? `${f.unsupported.length} of ${n} claims unsupported`
       : "Answer not supported by the sources";
 }
 
@@ -116,6 +126,14 @@ export default function Home() {
   const [corpus, setCorpus] = useState<CorpusState>({ type: "default", sources: [] });
 
   const busy = phase === "retrieving" || phase === "streaming" || phase === "verifying";
+
+  // A loaded sample document carries its own tailored questions; the built-in
+  // corpus falls back to the generic examples; a user's own upload shows none.
+  const activeExamples = corpus.examples?.length
+    ? corpus.examples
+    : corpus.type === "default"
+      ? EXAMPLES
+      : null;
 
   async function ask(q: string) {
     const query = q.trim();
@@ -277,7 +295,13 @@ export default function Home() {
   }
 
   const faith = result?.faithfulness;
-  const showFaith = !!faith && faith.verdict !== "skipped";
+  // An honest "the document does not cover that" is a correct refusal, not a
+  // hallucination — so when the grounded answer is itself a refusal, present it
+  // as "not in the document" and suppress the faithfulness verdict, which would
+  // otherwise flag the refusal sentence as an unsupported claim.
+  const answerRefusal =
+    !!result && result.grounded && phase === "done" && isRefusalAnswer(result.answer);
+  const showFaith = !!faith && faith.verdict !== "skipped" && !answerRefusal;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-7 px-5 py-14 sm:py-20">
@@ -295,9 +319,11 @@ export default function Home() {
             Retrieval Q&amp;A with guardrails
           </Badge>
         </div>
-        <p className="max-w-xl text-base leading-relaxed text-muted-foreground">
-          A question-answering agent that cites its sources, checks every claim, and refuses to
-          bluff when it does not know.
+        <p className="max-w-2xl text-base leading-relaxed text-muted-foreground">
+          Point it at a document a general chatbot has never read, such as a contract, a policy,
+          or a research paper, and get answers grounded in that source: every claim cited, every
+          claim checked against a real passage, and an honest &ldquo;I don&rsquo;t know&rdquo; when
+          the document does not say.
         </p>
       </header>
 
@@ -326,7 +352,11 @@ export default function Home() {
             <input
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Ask about chunking, embeddings, retrieval, grounding…"
+              placeholder={
+                corpus.type === "upload"
+                  ? "Ask a question about this document…"
+                  : "Ask about chunking, embeddings, retrieval, grounding…"
+              }
               maxLength={500}
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
@@ -351,12 +381,12 @@ export default function Home() {
           </div>
         </form>
 
-        {corpus.type === "default" && (
+        {activeExamples && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="mr-1 text-xs uppercase tracking-wide text-muted-foreground">
-              Try one
+              {corpus.examples?.length ? "Ask this document" : "Try one"}
             </span>
-            {EXAMPLES.map((ex) => (
+            {activeExamples.map((ex) => (
               <Button
                 key={ex}
                 type="button"
@@ -400,8 +430,12 @@ export default function Home() {
         <Card className="animate-in fade-in-50 slide-in-from-bottom-2 shadow-[0_8px_30px_rgba(2,6,23,0.06)] duration-500">
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className={result.grounded ? OK : WARN}>
-                {result.grounded ? (
+              <Badge variant="outline" className={result.grounded && !answerRefusal ? OK : WARN}>
+                {answerRefusal ? (
+                  <>
+                    <Ban className="size-3" /> Not in this document · declined to answer
+                  </>
+                ) : result.grounded ? (
                   <>
                     <ShieldCheck className="size-3" /> Grounded · top match{" "}
                     {result.topScore.toFixed(2)}
@@ -436,7 +470,7 @@ export default function Home() {
             </div>
 
             {/* Why it was grounded: how far the top hit stands out from the pile */}
-            {result.grounded && result.margin != null && (
+            {result.grounded && !answerRefusal && result.margin != null && (
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <TrendingUp className="size-3.5 text-emerald-600" />
                 Top match stands out {result.margin.toFixed(1)}σ above the other candidates, so the
@@ -447,7 +481,7 @@ export default function Home() {
             <div
               className={cn(
                 "text-[15px] leading-relaxed",
-                !result.grounded && "text-muted-foreground",
+                (!result.grounded || answerRefusal) && "text-muted-foreground",
               )}
             >
               {renderAnswer(result.answer)}
@@ -456,10 +490,10 @@ export default function Home() {
               )}
             </div>
 
-            {result.grounded && result.citations.length > 0 && (
+            {result.grounded && !answerRefusal && result.citations.length > 0 && (
               <p className="text-sm text-muted-foreground">
                 <span className="font-medium text-foreground">Sources:</span>{" "}
-                {result.citations.map((c) => c.source).join(", ")}
+                {[...new Set(result.citations.map((c) => c.source))].join(", ")}
               </p>
             )}
 
@@ -591,33 +625,58 @@ export default function Home() {
         </Card>
       )}
 
-      {/* Empty state: explain the two gates instead of a void */}
+      {/* Empty state: make the point of the product legible instead of a void */}
       {!result && phase === "idle" && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
-            <CardContent className="space-y-2 p-4">
-              <span className="grid size-8 place-items-center rounded-md bg-emerald-50 text-emerald-600">
-                <ShieldCheck className="size-4" />
-              </span>
-              <div className="text-sm font-medium">Grounding gate</div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Refuses to answer when retrieval is too weak, instead of guessing. Ask something
-                outside the corpus and watch it decline.
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
-            <CardContent className="space-y-2 p-4">
-              <span className="grid size-8 place-items-center rounded-md bg-primary/10 text-primary">
-                <BadgeCheck className="size-4" />
-              </span>
-              <div className="text-sm font-medium">Faithfulness check</div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                A second model verifies every claim in the answer against a real quote in the
-                sources, and flags anything unsupported.
-              </p>
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          <div className="rounded-xl border bg-muted/40 p-5">
+            <h2 className="text-sm font-semibold">Why not just ask ChatGPT?</h2>
+            <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              A general chatbot answers from memory and will fill any gap with a confident,
+              plausible-sounding guess. That is fine for trivia and dangerous for a contract, a
+              policy, or a research finding. Grounded answers only from the document you give it,
+              shows the exact passage behind every sentence, and refuses when the document does not
+              hold the answer. Load a sample above, or bring your own document, and check the work
+              yourself.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
+              <CardContent className="space-y-2 p-4">
+                <span className="grid size-8 place-items-center rounded-md bg-primary/10 text-primary">
+                  <Database className="size-4" />
+                </span>
+                <div className="text-sm font-medium">Your sources, not its memory</div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Answers are built only from the document you load, so they cannot quietly drift
+                  into training-data guesses.
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
+              <CardContent className="space-y-2 p-4">
+                <span className="grid size-8 place-items-center rounded-md bg-emerald-50 text-emerald-600">
+                  <BadgeCheck className="size-4" />
+                </span>
+                <div className="text-sm font-medium">Every claim traced to a quote</div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  A second model checks each sentence against a real passage and flags anything it
+                  cannot find in the source.
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
+              <CardContent className="space-y-2 p-4">
+                <span className="grid size-8 place-items-center rounded-md bg-amber-50 text-amber-600">
+                  <ShieldCheck className="size-4" />
+                </span>
+                <div className="text-sm font-medium">Refuses instead of bluffing</div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Ask something the document does not cover and it declines, rather than inventing a
+                  confident wrong answer.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 
