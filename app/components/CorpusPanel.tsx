@@ -199,7 +199,7 @@ export function CorpusPanel({
             )}
           </div>
           {error && (
-            <p className="flex items-center gap-1.5 text-sm text-rose-400">
+            <p className="flex items-center gap-1.5 text-sm text-rose-600">
               <AlertCircle className="size-4" /> {error}
             </p>
           )}
@@ -207,7 +207,7 @@ export function CorpusPanel({
       )}
 
       {note && !open && (
-        <div className="flex items-center gap-1.5 border-t border-border px-4 py-2 text-sm text-emerald-400">
+        <div className="flex items-center gap-1.5 border-t border-emerald-100 bg-emerald-50/50 px-4 py-2 text-sm text-emerald-700">
           <CheckCircle2 className="size-4" /> {note}
         </div>
       )}

@@ -3,63 +3,43 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Dark-only, premium theme: near-black canvas with a faint blue cast and an
-   indigo-violet brand accent. Semantic trust colors (grounded / refused /
-   unsupported) are applied per-component with emerald / amber / rose, kept
-   distinct from the brand so a green badge always means "verified", never
-   "primary action". */
+/* Clean, editorial-light theme. Pure white canvas, ink-slate text, and a single
+   confident cobalt accent for anything interactive. Semantic trust colors
+   (grounded / refused / unsupported) stay emerald / amber / rose and are applied
+   per-component, kept distinct from the cobalt brand so a green badge always
+   means "verified", never "primary action". The theme is intentionally forced
+   light (no system-dark override) so the surface reads the same for everyone. */
 :root {
-  --radius: 0.75rem;
+  --radius: 0.7rem;
 
-  --background: oklch(0.15 0.011 264);
-  --foreground: oklch(0.985 0.004 260);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.23 0.02 264);
 
-  --card: oklch(0.191 0.013 264);
-  --card-foreground: oklch(0.985 0.004 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.23 0.02 264);
 
-  --popover: oklch(0.205 0.014 264);
-  --popover-foreground: oklch(0.985 0.004 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.23 0.02 264);
 
-  --primary: oklch(0.62 0.187 277);
-  --primary-foreground: oklch(0.98 0.01 277);
+  /* Cobalt. */
+  --primary: oklch(0.52 0.235 264);
+  --primary-foreground: oklch(0.99 0.002 264);
 
-  --secondary: oklch(0.255 0.015 264);
-  --secondary-foreground: oklch(0.985 0.004 260);
+  --secondary: oklch(0.972 0.003 264);
+  --secondary-foreground: oklch(0.3 0.02 264);
 
-  --muted: oklch(0.255 0.015 264);
-  --muted-foreground: oklch(0.712 0.021 264);
+  --muted: oklch(0.968 0.004 264);
+  --muted-foreground: oklch(0.53 0.022 264);
 
-  --accent: oklch(0.28 0.03 277);
-  --accent-foreground: oklch(0.985 0.004 260);
+  --accent: oklch(0.955 0.02 264);
+  --accent-foreground: oklch(0.4 0.12 264);
 
-  --destructive: oklch(0.62 0.21 20);
-  --destructive-foreground: oklch(0.985 0.004 260);
+  --destructive: oklch(0.58 0.22 20);
+  --destructive-foreground: oklch(0.99 0.002 264);
 
-  --border: oklch(0.28 0.016 264);
-  --input: oklch(0.32 0.016 264);
-  --ring: oklch(0.62 0.187 277);
-}
-
-.dark {
-  --background: oklch(0.15 0.011 264);
-  --foreground: oklch(0.985 0.004 260);
-  --card: oklch(0.191 0.013 264);
-  --card-foreground: oklch(0.985 0.004 260);
-  --popover: oklch(0.205 0.014 264);
-  --popover-foreground: oklch(0.985 0.004 260);
-  --primary: oklch(0.62 0.187 277);
-  --primary-foreground: oklch(0.98 0.01 277);
-  --secondary: oklch(0.255 0.015 264);
-  --secondary-foreground: oklch(0.985 0.004 260);
-  --muted: oklch(0.255 0.015 264);
-  --muted-foreground: oklch(0.712 0.021 264);
-  --accent: oklch(0.28 0.03 277);
-  --accent-foreground: oklch(0.985 0.004 260);
-  --destructive: oklch(0.62 0.21 20);
-  --destructive-foreground: oklch(0.985 0.004 260);
-  --border: oklch(0.28 0.016 264);
-  --input: oklch(0.32 0.016 264);
-  --ring: oklch(0.62 0.187 277);
+  --border: oklch(0.918 0.005 264);
+  --input: oklch(0.9 0.006 264);
+  --ring: oklch(0.52 0.235 264);
 }
 
 @theme inline {
@@ -96,24 +76,41 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     @apply bg-background text-foreground;
-    /* Faint indigo glow anchored to the top, so an empty page still reads as
-       an intentional surface rather than a void. A fixed-position pseudo layer
-       (rather than background-attachment: fixed) keeps the glow put without the
-       repaint ghosting that fixed attachment causes. */
     position: relative;
   }
+  /* A soft cobalt wash anchored to the top, so the white canvas reads as an
+     intentional, lit surface rather than a blank page. Fixed-position pseudo
+     layers (rather than background-attachment) avoid repaint ghosting. */
   body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background-image: radial-gradient(
+      50% 38% at 50% -6%,
+      oklch(0.52 0.235 264 / 0.09),
+      transparent 72%
+    );
+  }
+  /* A faint engineered grid near the top that fades out — a quiet nod to the
+     precision of the product without cluttering the airy white space. */
+  body::after {
     content: "";
     position: fixed;
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background-image: radial-gradient(
-      60% 45% at 50% -5%,
-      oklch(0.62 0.187 277 / 0.12),
-      transparent 70%
-    );
+    background-image:
+      linear-gradient(oklch(0.5 0.02 264 / 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(0.5 0.02 264 / 0.045) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(64% 48% at 50% -2%, black, transparent 74%);
+    mask-image: radial-gradient(64% 48% at 50% -2%, black, transparent 74%);
   }
 }

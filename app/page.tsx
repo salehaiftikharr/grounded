@@ -88,11 +88,11 @@ const EXAMPLES = [
   "What is the capital of France?",
 ];
 
-// Semantic trust colors, kept distinct from the indigo brand: emerald = verified,
-// amber = held back, rose = unsupported.
-const OK = "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
-const WARN = "border-amber-500/25 bg-amber-500/10 text-amber-300";
-const BAD = "border-rose-500/25 bg-rose-500/10 text-rose-300";
+// Semantic trust colors, kept distinct from the cobalt brand: emerald = verified,
+// amber = held back, rose = unsupported. Tuned for a white surface.
+const OK = "border-emerald-600/20 bg-emerald-50 text-emerald-700";
+const WARN = "border-amber-600/20 bg-amber-50 text-amber-700";
+const BAD = "border-rose-600/20 bg-rose-50 text-rose-700";
 
 function faithClass(f: Faithfulness): string {
   return f.verdict === "supported" ? OK : f.verdict === "partial" ? WARN : BAD;
@@ -241,7 +241,7 @@ export default function Home() {
     return (
       <>
         {text.slice(0, idx)}
-        <mark className="rounded bg-primary/25 px-0.5 text-foreground">
+        <mark className="rounded bg-primary/15 px-0.5 text-foreground">
           {text.slice(idx, idx + needle.length)}
         </mark>
         {text.slice(idx + needle.length)}
@@ -280,22 +280,22 @@ export default function Home() {
   const showFaith = !!faith && faith.verdict !== "skipped";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10 sm:py-14">
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-7 px-5 py-14 sm:py-20">
       {/* Brand + intro */}
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <span className="grid size-9 place-items-center rounded-lg bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-lg shadow-primary/20">
+      <header className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="grid size-10 place-items-center rounded-xl bg-gradient-to-b from-blue-500 to-primary text-primary-foreground shadow-sm shadow-primary/30 ring-1 ring-inset ring-white/20">
             <ShieldCheck className="size-5" />
           </span>
-          <span className="text-2xl font-bold tracking-tight">Grounded</span>
+          <span className="text-[26px] font-bold tracking-tight">Grounded</span>
           <Badge
             variant="outline"
-            className="ml-0.5 hidden border-primary/25 bg-primary/5 text-primary sm:inline-flex"
+            className="ml-0.5 hidden border-primary/20 bg-primary/5 font-medium text-primary sm:inline-flex"
           >
             Retrieval Q&amp;A with guardrails
           </Badge>
         </div>
-        <p className="max-w-xl text-[15px] leading-relaxed text-muted-foreground">
+        <p className="max-w-xl text-base leading-relaxed text-muted-foreground">
           A question-answering agent that cites its sources, checks every claim, and refuses to
           bluff when it does not know.
         </p>
@@ -321,7 +321,7 @@ export default function Home() {
             void ask(question);
           }}
         >
-          <div className="flex items-center gap-2 rounded-xl border border-border bg-card p-2 shadow-sm transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+          <div className="flex items-center gap-2 rounded-2xl border bg-card p-2.5 shadow-[0_2px_12px_rgba(2,6,23,0.05)] transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/40">
             <Search className="ml-1.5 size-4 shrink-0 text-muted-foreground" />
             <input
               value={question}
@@ -376,7 +376,7 @@ export default function Home() {
         )}
 
         {error && (
-          <div className="flex items-center gap-2 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+          <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             <AlertCircle className="size-4 shrink-0" /> {error}
           </div>
         )}
@@ -397,7 +397,7 @@ export default function Home() {
 
       {/* Result (streams in) */}
       {result && (
-        <Card className="animate-in fade-in-50 slide-in-from-bottom-2 duration-500">
+        <Card className="animate-in fade-in-50 slide-in-from-bottom-2 shadow-[0_8px_30px_rgba(2,6,23,0.06)] duration-500">
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline" className={result.grounded ? OK : WARN}>
@@ -438,7 +438,7 @@ export default function Home() {
             {/* Why it was grounded: how far the top hit stands out from the pile */}
             {result.grounded && result.margin != null && (
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <TrendingUp className="size-3.5 text-emerald-400" />
+                <TrendingUp className="size-3.5 text-emerald-600" />
                 Top match stands out {result.margin.toFixed(1)}σ above the other candidates, so the
                 gate is confident it is grounded.
               </div>
@@ -498,16 +498,16 @@ export default function Home() {
                             className={cn(
                               "rounded-lg border p-3",
                               verified
-                                ? "border-emerald-500/20 bg-emerald-500/5"
-                                : "border-rose-500/20 bg-rose-500/5",
-                              verified && "cursor-pointer hover:bg-emerald-500/10",
+                                ? "border-emerald-200 bg-emerald-50/60"
+                                : "border-rose-200 bg-rose-50/60",
+                              verified && "cursor-pointer transition-colors hover:bg-emerald-50",
                             )}
                           >
                             <div className="flex items-start gap-2">
                               {verified ? (
-                                <Check className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                                <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" />
                               ) : (
-                                <X className="mt-0.5 size-4 shrink-0 text-rose-400" />
+                                <X className="mt-0.5 size-4 shrink-0 text-rose-600" />
                               )}
                               <div className="min-w-0 space-y-1">
                                 <div className="text-sm">{c.claim}</div>
@@ -594,9 +594,9 @@ export default function Home() {
       {/* Empty state: explain the two gates instead of a void */}
       {!result && phase === "idle" && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <Card className="gap-0 py-0">
+          <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
             <CardContent className="space-y-2 p-4">
-              <span className="grid size-8 place-items-center rounded-md bg-emerald-500/10 text-emerald-400">
+              <span className="grid size-8 place-items-center rounded-md bg-emerald-50 text-emerald-600">
                 <ShieldCheck className="size-4" />
               </span>
               <div className="text-sm font-medium">Grounding gate</div>
@@ -606,7 +606,7 @@ export default function Home() {
               </p>
             </CardContent>
           </Card>
-          <Card className="gap-0 py-0">
+          <Card className="gap-0 py-0 transition-shadow hover:shadow-[0_8px_30px_rgba(2,6,23,0.06)]">
             <CardContent className="space-y-2 p-4">
               <span className="grid size-8 place-items-center rounded-md bg-primary/10 text-primary">
                 <BadgeCheck className="size-4" />
