@@ -1,8 +1,19 @@
 import type { NextRequest } from "next/server";
+import { streamText } from "ai";
 import { loadIndex } from "@/src/lib/loadIndex";
 import { retrieve, retrieveFromSession } from "@/src/lib/retrieve";
-import { answerQuestion, isOverviewQuestion, topMargin } from "@/src/lib/answer";
-import { timed } from "@/src/lib/observe";
+import {
+  REFUSAL,
+  answerSystemPrompt,
+  answerPrompt,
+  buildContext,
+  isAnswerable,
+  isOverviewQuestion,
+  topMargin,
+} from "@/src/lib/answer";
+import { getChatModel } from "@/src/lib/model";
+import { verifyFaithfulness } from "@/src/lib/faithfulness";
+import { normalizeUsage, sumUsage, ZERO_USAGE } from "@/src/lib/observe";
 import { readSessionId } from "@/src/lib/session";
 import { sessionChunkCount } from "@/src/lib/db";
 
@@ -48,10 +59,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Pick the corpus: a visitor's uploaded document (namespaced by session) if
-  // they have one, otherwise the built-in demo corpus. Reading the session count
-  // is best-effort — if no database is configured we simply use the demo corpus,
-  // so the default experience never depends on the upload feature.
+  // Pick the corpus: a visitor's uploaded document (namespaced by session) if they
+  // have one, otherwise the built-in demo corpus. Best-effort — a missing database
+  // just means the default corpus is used.
   const sessionId = readSessionId(req);
   let uploadedCount = 0;
   if (sessionId) {
@@ -59,84 +69,138 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   const usingUpload = uploadedCount > 0;
 
-  // Everything downstream reaches a model or a data source, so wrap it: a transient
-  // 529 overload, an embedding timeout, a cold database, or a corrupt index should
-  // return a clean JSON error the UI can show, not a raw 500. Failing gracefully is
-  // the whole thesis of this project.
-  try {
-    let store: ReturnType<typeof loadIndex> | null = null;
-    if (!usingUpload) {
+  // Load (and sanity-check) the default index before opening the stream, so a
+  // missing index is a clean up-front error rather than a broken stream.
+  let store: ReturnType<typeof loadIndex> | null = null;
+  if (!usingUpload) {
+    try {
       store = loadIndex();
-      if (!store.size) {
-        return Response.json(
-          { error: "The index has not been built. Run `npm run precompute`." },
-          { status: 503 },
-        );
-      }
+    } catch {
+      store = null;
     }
-
-    // Overview questions need a broader slice of the corpus to summarize from, and
-    // they skip the similarity gate inside answerQuestion.
-    const overview = isOverviewQuestion(question);
-    const k = overview ? 8 : 4;
-    const { result: retrieved, ms: retrieveMs } = await timed(() =>
-      usingUpload
-        ? retrieveFromSession(sessionId as string, question, { k })
-        : retrieve(store!, question, { k }),
-    );
-    const { hits, candidateScores } = retrieved;
-    const retrieval = hits.map((h) => ({
-      source: h.chunk.source ?? h.chunk.id,
-      score: Number(h.score.toFixed(3)),
-      // Full (normalized) chunk text, capped — the UI highlights the supporting
-      // span inside it, so it needs more than a 240-char teaser.
-      snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 600),
-    }));
-
-    // verify: true runs the output-side faithfulness check after generation;
-    // candidateScores feed the relative grounding gate.
-    const result = await answerQuestion(question, hits, { verify: true, candidateScores, overview });
-
-    const f = result.faithfulness;
-
-    return Response.json({
-      grounded: result.grounded,
-      corpus: usingUpload ? "upload" : "default",
-      topScore: retrieval[0]?.score ?? 0,
-      // How far the top hit stands out from the candidate pile (a z-score) — the
-      // number that actually explains the gate decision. Null for overview
-      // questions (which bypass the relative gate) or too few candidates.
-      margin: overview ? null : topMargin(hits[0]?.score ?? 0, candidateScores),
-      answer: result.text,
-      citations: result.citations.map((c) => ({
-        source: c.source ?? c.id,
-        score: Number(c.score.toFixed(3)),
-      })),
-      retrieval,
-      faithfulness: f
-        ? {
-            verdict: f.verdict,
-            score: Number(f.score.toFixed(2)),
-            claims: f.claims,
-            unsupported: f.unsupported,
-          }
-        : null,
-      timings: {
-        retrieveMs,
-        generateMs: result.timings.generateMs,
-        verifyMs: result.timings.verifyMs,
-        totalMs: retrieveMs + result.timings.generateMs + result.timings.verifyMs,
-      },
-      usage: result.usage,
-    });
-  } catch (err) {
-    console.error("ask failed:", err);
-    return Response.json(
-      {
-        error:
-          "Something went wrong reaching the model or a data source. This is usually temporary, so please try again.",
-      },
-      { status: 502 },
-    );
+    if (!store || !store.size) {
+      return Response.json(
+        { error: "The index has not been built. Run `npm run precompute`." },
+        { status: 503 },
+      );
+    }
   }
+
+  // Stream the whole pipeline as newline-delimited JSON events so the UI can show
+  // the gate decision and sources immediately, then the answer as it generates,
+  // then the faithfulness verdict once the checker returns.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      try {
+        const overview = isOverviewQuestion(question);
+        const k = overview ? 8 : 4;
+
+        const tRetrieve = Date.now();
+        const { hits, candidateScores } = usingUpload
+          ? await retrieveFromSession(sessionId as string, question, { k })
+          : await retrieve(store!, question, { k });
+        const retrieveMs = Date.now() - tRetrieve;
+
+        const retrieval = hits.map((h) => ({
+          source: h.chunk.source ?? h.chunk.id,
+          score: Number(h.score.toFixed(3)),
+          snippet: h.chunk.text.replace(/\s+/g, " ").slice(0, 600),
+        }));
+        const citations = hits.map((h) => ({
+          source: h.chunk.source ?? h.chunk.id,
+          score: Number(h.score.toFixed(3)),
+        }));
+
+        const grounded = isAnswerable(hits, candidateScores, overview);
+
+        // The gate decision and sources go out first, before any generation.
+        send({
+          type: "meta",
+          grounded,
+          corpus: usingUpload ? "upload" : "default",
+          topScore: retrieval[0]?.score ?? 0,
+          margin: overview ? null : topMargin(hits[0]?.score ?? 0, candidateScores),
+          overview,
+          retrieval,
+          citations,
+        });
+
+        if (!grounded) {
+          send({ type: "delta", text: REFUSAL });
+          send({
+            type: "done",
+            faithfulness: null,
+            timings: { retrieveMs, generateMs: 0, verifyMs: 0, totalMs: retrieveMs },
+            usage: { ...ZERO_USAGE },
+          });
+          controller.close();
+          return;
+        }
+
+        // Stream the grounded answer token by token.
+        const tGen = Date.now();
+        const gen = streamText({
+          model: getChatModel(),
+          system: answerSystemPrompt(overview),
+          prompt: answerPrompt(buildContext(hits), question),
+        });
+        let fullText = "";
+        for await (const delta of gen.textStream) {
+          fullText += delta;
+          send({ type: "delta", text: delta });
+        }
+        const generateMs = Date.now() - tGen;
+        const genUsage = normalizeUsage(await gen.usage);
+        send({ type: "generated" });
+
+        // Output-side faithfulness check on the complete answer.
+        const tVerify = Date.now();
+        const faith = await verifyFaithfulness(fullText, hits);
+        const verifyMs = Date.now() - tVerify;
+        send({
+          type: "faithfulness",
+          faithfulness: {
+            verdict: faith.verdict,
+            score: Number(faith.score.toFixed(2)),
+            claims: faith.claims,
+            unsupported: faith.unsupported,
+          },
+        });
+
+        send({
+          type: "done",
+          timings: {
+            retrieveMs,
+            generateMs,
+            verifyMs,
+            totalMs: retrieveMs + generateMs + verifyMs,
+          },
+          usage: sumUsage(genUsage, faith.usage),
+        });
+        controller.close();
+      } catch (err) {
+        console.error("ask stream failed:", err);
+        try {
+          send({
+            type: "error",
+            error:
+              "Something went wrong reaching the model or a data source. This is usually temporary, so please try again.",
+          });
+        } catch {}
+        try {
+          controller.close();
+        } catch {}
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

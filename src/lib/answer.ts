@@ -98,8 +98,39 @@ export function topMargin(topScore: number, candidateScores: number[]): number |
   return (topScore - mu) / sd;
 }
 
-const REFUSAL =
+export const REFUSAL =
   "I don't have enough grounded information in the corpus to answer that confidently.";
+
+/** The system prompt for the answerer, factual vs overview mode. Shared by the
+ *  batch (answerQuestion) and streaming answer paths so the two never drift. */
+export function answerSystemPrompt(overview: boolean): string {
+  return overview
+    ? "You are given numbered excerpts from a single document. Give a brief, faithful overview of what the document is about, using ONLY these excerpts. Cite the excerpts you draw on as [1], [2], and so on. Do not use outside knowledge. If the excerpts are too fragmentary to tell, say that plainly."
+    : "You answer ONLY from the provided context. Cite sources inline as [1], [2], and so on, matching the numbered context blocks you used. If the context does not contain the answer, say you do not know. Never use outside knowledge or guess.";
+}
+
+/** Build the numbered context block the answerer is prompted with. */
+export function buildContext(hits: SearchHit[]): string {
+  return hits
+    .map((h, i) => `[${i + 1}] (${h.chunk.source ?? h.chunk.id})\n${h.chunk.text}`)
+    .join("\n\n");
+}
+
+/** The user prompt shared by the batch and streaming answer paths. */
+export function answerPrompt(context: string, question: string): string {
+  return `Context:\n${context}\n\nQuestion: ${question}\n\nGrounded, cited answer:`;
+}
+
+/** Whether retrieval is strong enough to answer at all: overview questions ground
+ *  on "a corpus exists", everything else goes through the full similarity gate. */
+export function isAnswerable(
+  hits: SearchHit[],
+  candidateScores: number[],
+  overview: boolean,
+  policy: GroundingPolicy = DEFAULT_POLICY,
+): boolean {
+  return overview ? hits.length >= policy.minHits : isGrounded(hits, candidateScores, policy);
+}
 
 // Overview questions ("what is this about?", "summarize this", "key points")
 // barely match any single chunk on similarity, so similarity gating wrongly
@@ -125,15 +156,7 @@ export async function answerQuestion(
   const policy = opts.policy ?? DEFAULT_POLICY;
   const overview = opts.overview ?? isOverviewQuestion(question);
 
-  // For an overview question the grounding condition is simply that a corpus
-  // exists, since no single chunk will score high against "what is this about?".
-  // Factual questions still go through the full similarity gate. Either way the
-  // faithfulness check downstream flags anything the excerpts do not support.
-  const groundedOk = overview
-    ? hits.length >= policy.minHits
-    : isGrounded(hits, opts.candidateScores ?? [], policy);
-
-  if (!groundedOk) {
+  if (!isAnswerable(hits, opts.candidateScores ?? [], overview, policy)) {
     return {
       grounded: false,
       text: REFUSAL,
@@ -143,19 +166,11 @@ export async function answerQuestion(
     };
   }
 
-  const context = hits
-    .map((h, i) => `[${i + 1}] (${h.chunk.source ?? h.chunk.id})\n${h.chunk.text}`)
-    .join("\n\n");
-
-  const system = overview
-    ? "You are given numbered excerpts from a single document. Give a brief, faithful overview of what the document is about, using ONLY these excerpts. Cite the excerpts you draw on as [1], [2], and so on. Do not use outside knowledge. If the excerpts are too fragmentary to tell, say that plainly."
-    : "You answer ONLY from the provided context. Cite sources inline as [1], [2], and so on, matching the numbered context blocks you used. If the context does not contain the answer, say you do not know. Never use outside knowledge or guess.";
-
   const { result: gen, ms: generateMs } = await timed(() =>
     generateText({
       model: getChatModel(opts.provider),
-      system,
-      prompt: `Context:\n${context}\n\nQuestion: ${question}\n\nGrounded, cited answer:`,
+      system: answerSystemPrompt(overview),
+      prompt: answerPrompt(buildContext(hits), question),
     }),
   );
 

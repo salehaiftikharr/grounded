@@ -13,6 +13,7 @@ import {
   ChevronDown,
   AlertCircle,
   ExternalLink,
+  TrendingUp,
 } from "lucide-react";
 import { MicButton, SpeakAnswer } from "./components/VoiceControls";
 import { CorpusPanel, type CorpusState } from "./components/CorpusPanel";
@@ -62,16 +63,23 @@ interface TokenUsage {
   total: number;
 }
 
+// Progressive result: populated as stream events arrive, so fields the pipeline
+// has not produced yet stay null.
 interface AskResult {
   grounded: boolean;
+  corpus: string;
   topScore: number;
+  margin: number | null;
+  overview: boolean;
   answer: string;
   citations: { source: string; score: number }[];
   retrieval: Hit[];
   faithfulness: Faithfulness | null;
-  timings: Timings;
-  usage: TokenUsage;
+  timings: Timings | null;
+  usage: TokenUsage | null;
 }
+
+type Phase = "idle" | "retrieving" | "streaming" | "verifying" | "done";
 
 const EXAMPLES = [
   "What does the grounding gate do?",
@@ -86,9 +94,20 @@ const OK = "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
 const WARN = "border-amber-500/25 bg-amber-500/10 text-amber-300";
 const BAD = "border-rose-500/25 bg-rose-500/10 text-rose-300";
 
+function faithClass(f: Faithfulness): string {
+  return f.verdict === "supported" ? OK : f.verdict === "partial" ? WARN : BAD;
+}
+function faithText(f: Faithfulness): string {
+  return f.verdict === "supported"
+    ? `Faithful to sources · all ${f.claims.length} claims supported`
+    : f.verdict === "partial"
+      ? `${f.unsupported.length} of ${f.claims.length} claims unsupported`
+      : "Answer not supported by the sources";
+}
+
 export default function Home() {
   const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<AskResult | null>(null);
   const [error, setError] = useState("");
   const [showDetails, setShowDetails] = useState(false);
@@ -96,31 +115,107 @@ export default function Home() {
   const [activeEvidence, setActiveEvidence] = useState<string | null>(null);
   const [corpus, setCorpus] = useState<CorpusState>({ type: "default", sources: [] });
 
+  const busy = phase === "retrieving" || phase === "streaming" || phase === "verifying";
+
   async function ask(q: string) {
     const query = q.trim();
-    if (!query || loading) return;
-    setLoading(true);
+    if (!query || busy) return;
     setError("");
     setResult(null);
     setShowDetails(false);
     setActiveCite(null);
     setActiveEvidence(null);
+    setPhase("retrieving");
+
     try {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: query }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+
+      // A pre-stream failure (rate limit, missing index, bad input) comes back as
+      // a normal JSON error, not a stream.
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
         setError(data.error || "Something went wrong.");
+        setPhase("idle");
         return;
       }
-      setResult(data as AskResult);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // Accumulate the answer and verdict in separate locals, then rebuild the
+      // result from the immutable `meta` block each event — a self-referential
+      // spread inside this loop trips up the compiler's flow analysis.
+      let meta: AskResult | null = null;
+      let answer = "";
+      let faithful: Faithfulness | null = null;
+      let timings: Timings | null = null;
+      let usage: TokenUsage | null = null;
+      const push = () => {
+        if (!meta) return;
+        setResult({ ...meta, answer, faithfulness: faithful, timings, usage });
+      };
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          let evt: Record<string, unknown>;
+          try {
+            evt = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (evt.type === "meta") {
+            meta = {
+              grounded: !!evt.grounded,
+              corpus: String(evt.corpus ?? "default"),
+              topScore: Number(evt.topScore ?? 0),
+              margin: evt.margin == null ? null : Number(evt.margin),
+              overview: !!evt.overview,
+              answer: "",
+              citations: (evt.citations as AskResult["citations"]) ?? [],
+              retrieval: (evt.retrieval as Hit[]) ?? [],
+              faithfulness: null,
+              timings: null,
+              usage: null,
+            };
+            push();
+            setPhase("streaming");
+          } else if (evt.type === "delta") {
+            answer += String(evt.text ?? "");
+            push();
+          } else if (evt.type === "generated") {
+            setPhase("verifying");
+          } else if (evt.type === "faithfulness") {
+            faithful = (evt.faithfulness as Faithfulness) ?? null;
+            push();
+          } else if (evt.type === "done") {
+            timings = (evt.timings as Timings) ?? timings;
+            usage = (evt.usage as TokenUsage) ?? usage;
+            if ("faithfulness" in evt) faithful = (evt.faithfulness as Faithfulness) ?? faithful;
+            push();
+            setPhase("done");
+          } else if (evt.type === "error") {
+            setError(String(evt.error ?? "Something went wrong."));
+            setResult(null);
+            setPhase("idle");
+          }
+        }
+      }
+      setPhase((p) => (p === "idle" ? p : "done"));
     } catch {
       setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
+      setPhase("idle");
     }
   }
 
@@ -183,14 +278,6 @@ export default function Home() {
 
   const faith = result?.faithfulness;
   const showFaith = !!faith && faith.verdict !== "skipped";
-  const faithClass =
-    faith?.verdict === "supported" ? OK : faith?.verdict === "partial" ? WARN : BAD;
-  const faithText =
-    faith?.verdict === "supported"
-      ? `Faithful to sources · all ${faith.claims.length} claims supported`
-      : faith?.verdict === "partial"
-        ? `${faith.unsupported.length} of ${faith.claims.length} claims unsupported`
-        : "Answer not supported by the sources";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10 sm:py-14">
@@ -217,11 +304,12 @@ export default function Home() {
       {/* Corpus source */}
       <CorpusPanel
         corpus={corpus}
-        busy={loading}
+        busy={busy}
         onCorpusChange={(next) => {
           setCorpus(next);
           setResult(null);
           setError("");
+          setPhase("idle");
         }}
       />
 
@@ -247,10 +335,10 @@ export default function Home() {
                 setQuestion(q);
                 void ask(q);
               }}
-              disabled={loading}
+              disabled={busy}
             />
-            <Button type="submit" disabled={loading || !question.trim()}>
-              {loading ? (
+            <Button type="submit" disabled={busy || !question.trim()}>
+              {busy ? (
                 <>
                   <Loader2 className="size-4 animate-spin" /> Thinking
                 </>
@@ -274,7 +362,7 @@ export default function Home() {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={loading}
+                disabled={busy}
                 className="rounded-full font-normal text-muted-foreground hover:text-foreground"
                 onClick={() => {
                   setQuestion(ex);
@@ -294,24 +382,21 @@ export default function Home() {
         )}
       </div>
 
-      {/* Loading */}
-      {loading && (
+      {/* Retrieving: before the first event arrives */}
+      {phase === "retrieving" && (
         <Card>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin text-primary" /> Retrieving, generating, and
-              verifying every claim…
+              <Loader2 className="size-4 animate-spin text-primary" /> Retrieving and checking the
+              sources…
             </div>
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
-            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/3" />
           </CardContent>
         </Card>
       )}
 
-      {/* Result */}
-      {result && !loading && (
+      {/* Result (streams in) */}
+      {result && (
         <Card className="animate-in fade-in-50 slide-in-from-bottom-2 duration-500">
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -327,20 +412,37 @@ export default function Home() {
                   </>
                 )}
               </Badge>
-              {showFaith && (
-                <Badge variant="outline" className={faithClass}>
+
+              {showFaith ? (
+                <Badge variant="outline" className={faithClass(faith!)}>
                   {faith!.verdict === "supported" ? (
                     <BadgeCheck className="size-3" />
                   ) : (
                     <AlertCircle className="size-3" />
                   )}
-                  {faithText}
+                  {faithText(faith!)}
                 </Badge>
+              ) : result.grounded && phase === "verifying" ? (
+                <Badge variant="outline" className="border-border text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" /> Checking every claim…
+                </Badge>
+              ) : null}
+
+              {phase === "done" && (
+                <div className="ml-auto">
+                  <SpeakAnswer text={result.answer} />
+                </div>
               )}
-              <div className="ml-auto">
-                <SpeakAnswer text={result.answer} />
-              </div>
             </div>
+
+            {/* Why it was grounded: how far the top hit stands out from the pile */}
+            {result.grounded && result.margin != null && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <TrendingUp className="size-3.5 text-emerald-400" />
+                Top match stands out {result.margin.toFixed(1)}σ above the other candidates, so the
+                gate is confident it is grounded.
+              </div>
+            )}
 
             <div
               className={cn(
@@ -349,6 +451,9 @@ export default function Home() {
               )}
             >
               {renderAnswer(result.answer)}
+              {phase === "streaming" && (
+                <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary align-middle" />
+              )}
             </div>
 
             {result.grounded && result.citations.length > 0 && (
@@ -358,125 +463,136 @@ export default function Home() {
               </p>
             )}
 
-            <Collapsible open={showDetails || !result.grounded} onOpenChange={setShowDetails}>
-              {result.grounded && (
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
-                    <ChevronDown
-                      className={cn("size-4 transition-transform", showDetails && "rotate-180")}
-                    />
-                    {showDetails ? "Hide the work" : "Show the work: claim check, retrieval, trace"}
-                  </Button>
-                </CollapsibleTrigger>
-              )}
+            {result.retrieval.length > 0 && (
+              <Collapsible open={showDetails || !result.grounded} onOpenChange={setShowDetails}>
+                {result.grounded && (
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
+                      <ChevronDown
+                        className={cn("size-4 transition-transform", showDetails && "rotate-180")}
+                      />
+                      {showDetails ? "Hide the work" : "Show the work: claim check, retrieval, trace"}
+                    </Button>
+                  </CollapsibleTrigger>
+                )}
 
-              <CollapsibleContent className="space-y-5 pt-3">
-                {faith && faith.claims.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Claim check
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      A second model verifies each statement against a real quote in the sources.
-                      Click a verified claim to see it.
-                    </p>
-                    {faith.claims.map((c, i) => {
-                      const verified = c.supported && c.evidenceLocated;
-                      return (
-                        <div
-                          key={i}
-                          onClick={() => verified && c.sourceIndex && focus(c.sourceIndex, c.evidence)}
-                          className={cn(
-                            "rounded-lg border p-3",
-                            verified
-                              ? "border-emerald-500/20 bg-emerald-500/5"
-                              : "border-rose-500/20 bg-rose-500/5",
-                            verified && "cursor-pointer hover:bg-emerald-500/10",
-                          )}
-                        >
-                          <div className="flex items-start gap-2">
-                            {verified ? (
-                              <Check className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-                            ) : (
-                              <X className="mt-0.5 size-4 shrink-0 text-rose-400" />
+                <CollapsibleContent className="space-y-5 pt-3">
+                  {faith && faith.claims.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Claim check
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        A second model, from a different family than the one that wrote the answer,
+                        verifies each statement against a real quote in the sources. Click a verified
+                        claim to see it.
+                      </p>
+                      {faith.claims.map((c, i) => {
+                        const verified = c.supported && c.evidenceLocated;
+                        return (
+                          <div
+                            key={i}
+                            onClick={() =>
+                              verified && c.sourceIndex && focus(c.sourceIndex, c.evidence)
+                            }
+                            className={cn(
+                              "rounded-lg border p-3",
+                              verified
+                                ? "border-emerald-500/20 bg-emerald-500/5"
+                                : "border-rose-500/20 bg-rose-500/5",
+                              verified && "cursor-pointer hover:bg-emerald-500/10",
                             )}
-                            <div className="min-w-0 space-y-1">
-                              <div className="text-sm">{c.claim}</div>
-                              {c.evidence && (
-                                <div className="text-xs italic text-muted-foreground">
-                                  &ldquo;{c.evidence}&rdquo;
-                                </div>
+                          >
+                            <div className="flex items-start gap-2">
+                              {verified ? (
+                                <Check className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                              ) : (
+                                <X className="mt-0.5 size-4 shrink-0 text-rose-400" />
                               )}
-                              <div className="text-[11px] text-muted-foreground">
-                                {verified
-                                  ? `verified in ${c.sourceIndex ? `[${c.sourceIndex}]` : "sources"}`
-                                  : c.supported && !c.evidenceLocated
-                                    ? "quote not found in the sources"
-                                    : "not supported"}
+                              <div className="min-w-0 space-y-1">
+                                <div className="text-sm">{c.claim}</div>
+                                {c.evidence && (
+                                  <div className="text-xs italic text-muted-foreground">
+                                    &ldquo;{c.evidence}&rdquo;
+                                  </div>
+                                )}
+                                <div className="text-[11px] text-muted-foreground">
+                                  {verified
+                                    ? `verified in ${c.sourceIndex ? `[${c.sourceIndex}]` : "sources"}`
+                                    : c.supported && !c.evidenceLocated
+                                      ? "quote not found in the sources"
+                                      : "not supported"}
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Retrieved context{" "}
-                    {result.grounded ? "(used to answer)" : "(too weak, so the gate refused)"}
-                  </div>
-                  {result.retrieval.map((h, i) => (
-                    <div
-                      key={i}
-                      id={`hit-${i + 1}`}
-                      className={cn(
-                        "scroll-mt-24 rounded-lg border p-3 transition-colors",
-                        activeCite === i + 1 ? "border-primary/40 bg-primary/5" : "border-border",
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2 text-xs">
-                        <span className="font-medium">
-                          [{i + 1}] {h.source}
-                        </span>
-                        <span className="font-mono text-muted-foreground">
-                          similarity {h.score.toFixed(3)}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${Math.max(0, Math.min(100, h.score * 100))}%` }}
-                        />
-                      </div>
-                      <div className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                        {highlightSnippet(h.snippet, activeCite === i + 1 ? activeEvidence : null)}…
-                      </div>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
+                  )}
 
-                <div className="flex flex-wrap gap-2 font-mono text-[11px] text-muted-foreground">
-                  <span className="rounded bg-muted px-2 py-1">
-                    retrieve {result.timings.retrieveMs}ms
-                  </span>
-                  <span className="rounded bg-muted px-2 py-1">
-                    generate {result.timings.generateMs}ms
-                  </span>
-                  <span className="rounded bg-muted px-2 py-1">
-                    verify {result.timings.verifyMs}ms
-                  </span>
-                  <span className="rounded bg-muted px-2 py-1">{result.usage.total} tokens</span>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Retrieved context{" "}
+                      {result.grounded ? "(used to answer)" : "(too weak, so the gate refused)"}
+                    </div>
+                    {result.retrieval.map((h, i) => (
+                      <div
+                        key={i}
+                        id={`hit-${i + 1}`}
+                        className={cn(
+                          "scroll-mt-24 rounded-lg border p-3 transition-colors",
+                          activeCite === i + 1 ? "border-primary/40 bg-primary/5" : "border-border",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-medium">
+                            [{i + 1}] {h.source}
+                          </span>
+                          <span className="font-mono text-muted-foreground">
+                            similarity {h.score.toFixed(3)}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${Math.max(0, Math.min(100, h.score * 100))}%` }}
+                          />
+                        </div>
+                        <div className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                          {highlightSnippet(h.snippet, activeCite === i + 1 ? activeEvidence : null)}…
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {result.timings && (
+                    <div className="flex flex-wrap gap-2 font-mono text-[11px] text-muted-foreground">
+                      <span className="rounded bg-muted px-2 py-1">
+                        retrieve {result.timings.retrieveMs}ms
+                      </span>
+                      <span className="rounded bg-muted px-2 py-1">
+                        generate {result.timings.generateMs}ms
+                      </span>
+                      <span className="rounded bg-muted px-2 py-1">
+                        verify {result.timings.verifyMs}ms
+                      </span>
+                      {result.usage && (
+                        <span className="rounded bg-muted px-2 py-1">
+                          {result.usage.total} tokens
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </CardContent>
         </Card>
       )}
 
       {/* Empty state: explain the two gates instead of a void */}
-      {!result && !loading && (
+      {!result && phase === "idle" && (
         <div className="grid gap-3 sm:grid-cols-2">
           <Card className="gap-0 py-0">
             <CardContent className="space-y-2 p-4">
