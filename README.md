@@ -2,6 +2,12 @@
 
 [![CI](https://github.com/salehaiftikharr/grounded/actions/workflows/ci.yml/badge.svg)](https://github.com/salehaiftikharr/grounded/actions/workflows/ci.yml)
 
+**[Live demo →](https://grounded-theta.vercel.app)**. Point it at a document a
+general chatbot has never seen (a contract, a policy, a research paper) and get
+answers you can verify line by line.
+
+[![Grounded answering a service agreement with citations and a faithfulness check](docs/screenshot.png)](https://grounded-theta.vercel.app)
+
 A retrieval-augmented Q&A agent that **answers only from its corpus, cites its
 sources, and refuses when the answer is not grounded.** Ask it something the
 documents cover and it answers with citations; ask it something they do not and
@@ -54,11 +60,11 @@ I don't have enough grounded information in the corpus to answer that confidentl
                                       answer + per-claim verdicts + trace
 ```
 
-- **Ingest** (`src/ingest.ts`, `src/chunk.ts`) — split docs into overlapping chunks, embed them, persist to a JSON vector store.
-- **Retrieve** (`src/retrieve.ts`) — embed the query, vector-search a wide candidate set, then **rerank** by blending cosine score with lexical overlap (a cheap stand-in for a cross-encoder reranker, which slots in at the same seam).
-- **Ground & answer** (`src/answer.ts`) — the **grounding gate** (`isGrounded`) checks hit count and top similarity; only if it passes does the LLM generate an answer constrained to the retrieved context, with inline citations.
-- **Verify** (`src/faithfulness.ts`) — after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context. This catches the model drifting past its sources even when retrieval succeeded. Three things keep the check from rubber-stamping: the checker is a **different model** from the generator (shared weights share blind spots); it is prompted **adversarially** (assume unsupported until proven); and each supporting quote is **mechanically verified to be an actual substring of a retrieved chunk** — a claim only counts if its quote provably exists, so the signal is "a model pointed at text that is really there," not "a model agreed." (That same substring match locates the sentence the UI highlights.) Precise about the limit: the mechanical step hardens that the quote is *real*, not that it *entails* the claim — whether the cited span actually supports the statement remains a model judgment.
-- **Observe** (`src/observe.ts`) — every request reports where the time went (retrieve / generate / verify) and how many tokens it cost, surfaced in the CLI and the web UI.
+- **Ingest** (`src/lib/ingest.ts`, `src/lib/chunk.ts`): split docs into overlapping chunks, embed them, persist to a JSON vector store.
+- **Retrieve** (`src/lib/retrieve.ts`): embed the query, vector-search a wide candidate set, then **rerank** by blending cosine score with lexical overlap (a cheap stand-in for a cross-encoder reranker, which slots in at the same seam).
+- **Ground & answer** (`src/lib/answer.ts`): the **grounding gate** (`isGrounded`) checks hit count and top similarity; only if it passes does the LLM generate an answer constrained to the retrieved context, with inline citations.
+- **Verify** (`src/lib/faithfulness.ts`): after generation, a separate fact-checking pass breaks the answer into individual claims and judges each against the retrieved context. This catches the model drifting past its sources even when retrieval succeeded. Three things keep the check from rubber-stamping: the checker is a **different model** from the generator (shared weights share blind spots); it is prompted **adversarially** (assume unsupported until proven); and each supporting quote is **mechanically verified to be an actual substring of a retrieved chunk**, so a claim only counts if its quote provably exists, and the signal is "a model pointed at text that is really there," not "a model agreed." (That same substring match locates the sentence the UI highlights.) Precise about the limit: the mechanical step hardens that the quote is *real*, not that it *entails* the claim. Whether the cited span actually supports the statement remains a model judgment.
+- **Observe** (`src/lib/observe.ts`): every request reports where the time went (retrieve / generate / verify) and how many tokens it cost, surfaced in the CLI and the web UI.
 
 ## Why two gates
 
@@ -66,9 +72,9 @@ A wrong answer delivered confidently is worse than an honest "I don't know,"
 especially anywhere the output is trusted. There are two ways a RAG system gets
 this wrong, so there are two gates:
 
-- The **grounding gate** refuses when retrieval is too weak to answer — it would
+- The **grounding gate** refuses when retrieval is too weak to answer; it would
   rather say nothing than fabricate.
-- The **faithfulness check** flags when the answer outran its evidence — stating
+- The **faithfulness check** flags when the answer outran its evidence, stating
   something the retrieved sources never actually say, even though retrieval
   succeeded.
 
@@ -76,18 +82,18 @@ Together they are the same "never ship the wrong thing" stance as a verification
 gate in agent work, applied to both the input and the output of retrieval.
 
 **What faithfulness does and does not mean.** The check measures whether the
-answer is faithful to the *retrieved evidence* — not whether it is *true*. If
+answer is faithful to the *retrieved evidence*, not whether it is *true*. If
 retrieval surfaces a chunk that is similar but wrong, an answer can be perfectly
 faithful to it and still false. Faithfulness assumes the grounding gate and the
 corpus did their job; it is a guard against the model, not against bad sources.
 
 ## The eval (a regression set, not a benchmark)
 
-`grounded eval` runs a **small, labeled regression set** (`src/eval/cases.ts`).
-With this few cases the pass rate is a smoke test, not a statistic — the value is
+`grounded eval` runs a **small, labeled regression set** (`src/lib/eval/cases.ts`).
+With this few cases the pass rate is a smoke test, not a statistic. The value is
 catching regressions and the **adversarial near-misses**: questions that borrow the
 corpus's vocabulary but ask about things it never covers. It reports retrieval
-hit-rate, refusal discipline, and — with `--verify` — mean answer faithfulness.
+hit-rate, refusal discipline, and, with `--verify`, mean answer faithfulness.
 
 ```
 $ npm run grounded eval
@@ -119,10 +125,10 @@ Two things this surfaced, both kept honestly rather than tuned away:
   that does not transfer across corpora), with a low absolute floor as a backstop.
 - **One near-miss still passes the gate** ("which vector database is fastest at
   billion-scale search?") because it shares too much vocabulary with the retrieval
-  doc — "distinctive" is not "relevant." Being precise about what catches it: the
+  doc; "distinctive" is not "relevant." Being precise about what catches it: the
   **generator** answers "I do not know" from the vocab-similar chunks. That is the
-  generator's own discretion — the very LLM-judgment this system tries not to lean
-  on — *not* the faithfulness gate, which never fires because no claim is produced
+  generator's own discretion (the very LLM-judgment this system tries not to lean
+  on), *not* the faithfulness gate, which never fires because no claim is produced
   to check. So this case demonstrates the generator behaving well, not the second
   gate working. The faithfulness gate's real guarantee is shown elsewhere: the
   mechanical quote check drops any claim whose evidence is not a verbatim substring
@@ -138,7 +144,7 @@ $ npm run grounded verify "What does the grounding gate do?" \
     "The grounding gate runs before generation and refuses when retrieval is too weak.
      It uses a fixed cosine threshold of 0.82 and a neural reranker trained on user clicks."
 
-Verdict: partial — 2/4 claims hold up (50%)
+Verdict: partial (2/4 claims hold up, 50%)
 
   ✓ The grounding gate runs before generation
       ↳ verified in [2]: "The grounding gate is a guardrail that runs before generation."
@@ -174,7 +180,7 @@ npm run grounded eval -- --verify  # also measures faithfulness + quote-location
 
 `npm test` runs the unit tests for the deterministic core (chunking, cosine
 search, reranking, the grounding gate, faithfulness scoring, and token
-accounting) — no API key needed.
+accounting), with no API key needed.
 
 ## Web app
 
@@ -183,7 +189,25 @@ A Next.js UI (`app/`) makes the whole thing clickable: ask a question and see th
 with the top similarity), a **claim check** marking each statement supported or
 unsupported against the sources, a **retrieval panel** showing the exact chunks
 that were pulled and their scores, and a **trace** of latency and token cost. Most
-RAG demos hide the machinery; this one shows it.
+RAG demos hide the machinery; this one shows it. Try it at
+**[grounded-theta.vercel.app](https://grounded-theta.vercel.app)**.
+
+The live app is built around the use case rather than a self-referential corpus:
+
+- **One-click sample documents.** A company policy, a service contract, and a
+  research summary, each fictional so a correct answer can only come from
+  retrieval, not the model's memory. Every sample ends with a question the
+  document does not answer, so you can watch the system decline rather than guess.
+- **Bring your own document.** Upload a PDF, TXT, or MD file, or paste text; it is
+  chunked, embedded into Postgres with pgvector, and answered through the same two
+  gates, scoped to your session and cleared after a day.
+- **Answers stream in live.** The grounding decision and the retrieved sources
+  appear first, the answer types out token by token, and the faithfulness verdict
+  resolves once the checker returns.
+- **Honest refusals read as refusals.** When a document is on-topic enough to
+  retrieve but does not actually contain the answer, the reply is shown as "not in
+  this document," not a confident guess with a green badge.
+- **Voice layer.** An ElevenLabs integration reads answers, and refusals, aloud.
 
 ```bash
 npm run precompute     # build data/index.json from ./corpus (needs OPENAI_API_KEY)
@@ -197,15 +221,15 @@ generation is IP-rate-limited to cap demo spend.
 ## Deploy (Vercel)
 
 1. `npm run precompute` and commit the generated `data/index.json` (so the
-   deployment ships with its index — no ingest at runtime).
+   deployment ships with its index, with no ingest at runtime).
 2. Push and import the repo into Vercel.
 3. Set env vars: `OPENAI_API_KEY` (embeddings) and `ANTHROPIC_API_KEY` (generation).
 4. Deploy. Re-run `precompute` and re-commit whenever the corpus changes.
 
 ## Stack & production swap points
 
-- **TypeScript + Next.js + Vercel AI SDK** (`ai`), provider seam in `src/lib/model.ts` — Claude or GPT for generation, OpenAI embeddings.
-- **Decorrelated checker** — the faithfulness checker defaults to a smaller, faster model than the generator; set `CHECKER_PROVIDER=openai` (or `CHECKER_MODEL`) to verify with a different model *family* entirely.
+- **TypeScript + Next.js + Vercel AI SDK** (`ai`), provider seam in `src/lib/model.ts`: Claude or GPT for generation, OpenAI embeddings.
+- **Decorrelated checker**: the faithfulness checker defaults to a smaller, faster model than the generator; set `CHECKER_PROVIDER=openai` (or `CHECKER_MODEL`) to verify with a different model *family* entirely.
 - **Grounding gate** is relative (z-score over the candidate distribution) plus an absolute floor, in `src/lib/answer.ts`; tune `minMargin` / `minTopScore` per corpus.
 - **Vector store** is in-memory + JSON for a corpus this size; the `VectorStore` interface in `src/lib/store.ts` (`add` / `search` / `persist`) is the swap point for **pgvector / Pinecone / Weaviate**.
 - **Reranker** is lexical-overlap today; the `rerank()` seam in `src/lib/retrieve.ts` is where a cross-encoder or LLM reranker drops in.
